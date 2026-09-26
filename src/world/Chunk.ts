@@ -24,7 +24,7 @@
  * @module world/Chunk
  */
 
-import { BlockId } from './BlockRegistry';
+import { BlockId, MAX_BLOCK_ID } from './BlockRegistry';
 import {
   CHUNK_AREA,
   CHUNK_SIZE_X,
@@ -95,7 +95,7 @@ export class Chunk {
     return this.#edits.size > 0;
   }
 
-  /** True while the cached height map needs to be recomputed. */
+  /** True while a light propagation pass is required. */
   public get lightDirty(): boolean {
     return this.#lightDirty;
   }
@@ -201,6 +201,17 @@ export class Chunk {
   }
 
   /**
+   * Clears the light-dirty flag.
+   *
+   * The flag is set by every block change and by {@link applyEdits}; without a
+   * way to acknowledge it, a future light propagation pass that gates on it would
+   * rebuild lighting every frame for every loaded chunk.
+   */
+  public markLightClean(): void {
+    this.#lightDirty = false;
+  }
+
+  /**
    * Recomputes the cached height map and the highest non-air block.
    *
    * Called after bulk generation, where per-block incremental maintenance would
@@ -245,7 +256,15 @@ export class Chunk {
    */
   public applyEdits(edits: readonly BlockEdit[]): void {
     for (const edit of edits) {
-      if (edit.index < 0 || edit.index >= CHUNK_VOLUME) {
+      // A non-integer index would be stored as an array property while the byte
+      // array stays unchanged, and an out-of-range id would be silently truncated
+      // by the `Uint8Array` (300 becomes 44) while the edit log keeps the original
+      // value — so the next save would reload a different block than the one that
+      // was written.
+      if (!Number.isInteger(edit.index) || edit.index < 0 || edit.index >= CHUNK_VOLUME) {
+        continue;
+      }
+      if (!Number.isInteger(edit.id) || edit.id < 0 || edit.id > MAX_BLOCK_ID) {
         continue;
       }
       this.blocks[edit.index] = edit.id;
@@ -253,6 +272,9 @@ export class Chunk {
     }
     this.recomputeHeightMap();
     this.#meshDirty = true;
+    // Replayed edits change what the player sees, so any cached lighting for this
+    // chunk is stale as well.
+    this.#lightDirty = true;
   }
 
   #recomputeColumn(columnIndex: number, lx: number, lz: number): void {

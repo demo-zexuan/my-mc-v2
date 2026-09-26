@@ -92,9 +92,11 @@ export function createRenderer(
 
     if (options.shadows ?? true) {
       renderer.shadowMap.enabled = true;
-      // PCF soft shadows hide the stair-stepping that is very visible on the
-      // long, flat surfaces of a voxel world.
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // `PCFSoftShadowMap` was removed in Three.js r186 and silently fell back to
+      // `PCFShadowMap` with a console warning, which would have failed the
+      // "no severe console error" gate. PCF already removes the stair-stepping
+      // that is very visible on the long, flat surfaces of a voxel world.
+      renderer.shadowMap.type = THREE.PCFShadowMap;
     }
 
     let disposed = false;

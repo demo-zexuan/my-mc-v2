@@ -130,10 +130,17 @@ export class World {
    * @returns The stored chunk.
    */
   public adoptGeneratedChunk(cx: number, cz: number, blocks: Uint8Array): Chunk {
-    const chunk = new Chunk(cx, cz, blocks);
-    this.#chunks.set(chunkKey(cx, cz), chunk);
-    this.#pending.delete(chunkKey(cx, cz));
-    return chunk;
+    // A malformed payload throws out of the `Chunk` constructor. The pending flag
+    // must be cleared regardless: leaving it set marks the chunk as "generating"
+    // forever, so the streamer never retries and the player keeps a permanent hole
+    // in the world.
+    try {
+      const chunk = new Chunk(cx, cz, blocks);
+      this.#chunks.set(chunkKey(cx, cz), chunk);
+      return chunk;
+    } finally {
+      this.#pending.delete(chunkKey(cx, cz));
+    }
   }
 
   /**
@@ -161,7 +168,20 @@ export class World {
 
     const target: ChunkDataTarget = {
       setBlock: (lx, y, lz, id): void => {
-        if (lx < 0 || lx >= CHUNK_SIZE_X || lz < 0 || lz >= CHUNK_SIZE_Z) {
+        // Fractional coordinates are rejected rather than truncated: an integer
+        // index is what protects the flat array from aliasing, and a generator
+        // passing a float has a bug worth surfacing during development.
+        if (
+          !Number.isInteger(lx) ||
+          !Number.isInteger(y) ||
+          !Number.isInteger(lz) ||
+          lx < 0 ||
+          lx >= CHUNK_SIZE_X ||
+          lz < 0 ||
+          lz >= CHUNK_SIZE_Z ||
+          y < 0 ||
+          y > WORLD_MAX_Y
+        ) {
           return;
         }
         blocks[indexInChunk(lx, y, lz)] = id;
@@ -169,10 +189,16 @@ export class World {
     };
 
     this.generator.generate(cx, cz, target);
-    const chunk = new Chunk(cx, cz, blocks);
-    this.#chunks.set(chunkKey(cx, cz), chunk);
-    this.#pending.delete(chunkKey(cx, cz));
-    return chunk;
+    // A malformed payload throws out of the `Chunk` constructor; the pending flag
+    // must be cleared regardless, otherwise that chunk stays "generating" forever
+    // and the streamer never retries it.
+    try {
+      const chunk = new Chunk(cx, cz, blocks);
+      this.#chunks.set(chunkKey(cx, cz), chunk);
+      return chunk;
+    } finally {
+      this.#pending.delete(chunkKey(cx, cz));
+    }
   }
 
   /**
@@ -210,19 +236,33 @@ export class World {
    * @param z - World Z.
    */
   public getBlock(x: number, y: number, z: number): BlockId {
-    const { lx, lz } = blockToLocal(x, z);
-    const { cx, cz } = this.chunkOf(x, z);
-    const chunk = this.#chunks.get(chunkKey(cx, cz));
-    if (chunk === undefined) {
-      return BlockId.Air;
-    }
+    // I. Boundary checks come before the chunk lookup.
+    // 1. The "below the world is bedrock" rule has to hold for unloaded chunks
+    //    too. Resolving the chunk first made y < 0 report air outside the loaded
+    //    area, so the player fell out of the world and the mesher lost the free
+    //    bottom-face culling it relies on.
     if (y < 0) {
       return BlockId.Bedrock;
     }
     if (y > WORLD_MAX_Y) {
       return BlockId.Air;
     }
-    return chunk.blocks[indexInChunk(lx, y, lz)] as BlockId;
+    // II. Reject fractional coordinates.
+    // 1. The flat index is `y * 256 + z * 16 + x`, so a fractional z such as
+    //    0.0625 or a fractional y such as 0.5 lands on an integer index and
+    //    silently aliases a completely different block. Callers passing a float
+    //    is a bug, but it must not corrupt the answer.
+    if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)) {
+      return BlockId.Air;
+    }
+
+    const { lx, lz } = blockToLocal(x, z);
+    const { cx, cz } = this.chunkOf(x, z);
+    const chunk = this.#chunks.get(chunkKey(cx, cz));
+    if (chunk === undefined) {
+      return BlockId.Air;
+    }
+    return (chunk.blocks[indexInChunk(lx, y, lz)] ?? BlockId.Air) as BlockId;
   }
 
   /**
@@ -243,7 +283,15 @@ export class World {
    * @returns True when the world changed.
    */
   public setBlock(x: number, y: number, z: number, id: BlockId, recordEdit = true): boolean {
-    if (!isInsideWorldHeight(y)) {
+    // Fractional coordinates used to return `true`, mark the chunk and its
+    // neighbours dirty, and record an edit at a fractional index while storing
+    // nothing — a mismatch that then travelled into the save file.
+    if (
+      !Number.isInteger(x) ||
+      !Number.isInteger(y) ||
+      !Number.isInteger(z) ||
+      !isInsideWorldHeight(y)
+    ) {
       return false;
     }
 

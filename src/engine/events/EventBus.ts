@@ -23,6 +23,7 @@
  */
 
 import type { BlockId } from '@/world/BlockRegistry';
+import { logger } from '@/utils/logger';
 
 /** Payload shapes for every game event. */
 export interface GameEventMap {
@@ -89,6 +90,8 @@ export type GameEventListener<K extends GameEventName> = (payload: GameEventMap[
 /** Unsubscribe handle returned by {@link EventBus.on}. */
 export type Unsubscribe = () => void;
 
+const log = logger.child('events');
+
 export class EventBus {
   readonly #listeners = new Map<GameEventName, Set<(payload: never) => void>>();
   #dispatchDepth = 0;
@@ -149,17 +152,33 @@ export class EventBus {
       this.#pendingRemovals = [];
     }
 
-    // Snapshot: a listener may subscribe or unsubscribe during dispatch.
-    for (const listener of [...set]) {
-      (listener as (value: GameEventMap[K]) => void)(payload);
-    }
-
-    this.#dispatchDepth -= 1;
-    if (this.#dispatchDepth === 0) {
-      const removals = this.#pendingRemovals ?? [];
-      this.#pendingRemovals = null;
-      for (const remove of removals) {
-        remove();
+    try {
+      // Snapshot: a listener may subscribe or unsubscribe during dispatch.
+      for (const listener of [...set]) {
+        // I. A failing listener must not take down the rest of the chain.
+        // 1. `block:broken` fans out to audio, particles, inventory and the save
+        //    system. If the audio device disappears mid-game and throws, the player
+        //    would silently stop collecting drops — a far worse outcome than a
+        //    missing sound.
+        try {
+          (listener as (value: GameEventMap[K]) => void)(payload);
+        } catch (error) {
+          log.error(`listener for "${event}" threw and was skipped`, error);
+        }
+      }
+    } finally {
+      // II. The depth counter must always unwind.
+      // 1. Without `finally`, a throwing listener left the depth above zero
+      //    forever: every later unsubscribe was deferred into `#pendingRemovals`
+      //    and never applied, so closed listeners kept firing and the removal
+      //    queue grew without bound.
+      this.#dispatchDepth -= 1;
+      if (this.#dispatchDepth === 0) {
+        const removals = this.#pendingRemovals ?? [];
+        this.#pendingRemovals = null;
+        for (const remove of removals) {
+          remove();
+        }
       }
     }
   }

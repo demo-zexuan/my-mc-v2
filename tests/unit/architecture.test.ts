@@ -171,7 +171,10 @@ function clauseIsTypeOnly(clause: string): boolean {
       .map((part) => part.trim())
       .filter((part) => part !== '');
     // A default or namespace binding outside the braces keeps the import alive.
-    const outsideBraces = trimmed.replace(/\{[^}]*\}/, '').replace(/,\s*$/, '').trim();
+    const outsideBraces = trimmed
+      .replace(/\{[^}]*\}/, '')
+      .replace(/,\s*$/, '')
+      .trim();
     const hasRuntimeOutsideBraces =
       outsideBraces !== '' && outsideBraces !== ',' && outsideBraces !== 'default';
     if (!hasRuntimeOutsideBraces && parts.length > 0 && parts.every((p) => p.startsWith('type '))) {
@@ -368,7 +371,11 @@ describe('architecture constraints', () => {
             `${module.displayPath} (${module.layer}) -> ${target.displayPath} (${targetLayer})`,
           );
         }
-        if (isTopLevel && targetLayer === 'app' && module.filePath !== target.filePath) {
+        if (isTopLevel && targetLayer === 'app' && module.layer !== 'app') {
+          // Intra-layer imports are legitimate: `GameApp` composes `GameState`
+          // and `WorldSession`, which all live in the application layer. The rule
+          // exists to stop *lower* layers from depending on the assembly, not to
+          // forbid the assembly from being organised into modules.
           violations.push(
             `${module.displayPath} (${module.layer}) -> ${target.displayPath} (${targetLayer})`,
           );

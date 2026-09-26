@@ -110,7 +110,9 @@ function readBoolean(record: Record<string, unknown>, key: string, fallback: boo
 
 function readQuality(record: Record<string, unknown>): GraphicsQuality {
   const raw = record['graphicsQuality'];
-  return raw === 'low' || raw === 'medium' || raw === 'high' ? raw : DEFAULT_SETTINGS.graphicsQuality;
+  return raw === 'low' || raw === 'medium' || raw === 'high'
+    ? raw
+    : DEFAULT_SETTINGS.graphicsQuality;
 }
 
 /**
@@ -126,15 +128,13 @@ export function normalizeSettings(value: unknown): GameSettings {
   const record = asRecord(value);
 
   return {
-    mouseSensitivity: readNumber(
-      record,
-      'mouseSensitivity',
-      DEFAULT_SETTINGS.mouseSensitivity,
-    ),
+    mouseSensitivity: readNumber(record, 'mouseSensitivity', DEFAULT_SETTINGS.mouseSensitivity),
     fov: readNumber(record, 'fov', DEFAULT_SETTINGS.fov),
     // A fractional render distance would create half-chunks in the streaming
     // radius arithmetic, so it is rounded to a whole chunk count.
-    renderDistance: Math.round(readNumber(record, 'renderDistance', DEFAULT_SETTINGS.renderDistance)),
+    renderDistance: Math.round(
+      readNumber(record, 'renderDistance', DEFAULT_SETTINGS.renderDistance),
+    ),
     masterVolume: readNumber(record, 'masterVolume', DEFAULT_SETTINGS.masterVolume),
     sfxVolume: readNumber(record, 'sfxVolume', DEFAULT_SETTINGS.sfxVolume),
     ambientVolume: readNumber(record, 'ambientVolume', DEFAULT_SETTINGS.ambientVolume),
