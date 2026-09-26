@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="A Minecraft-like 3D voxel sandbox game built with Three.js and TypeScript."
+    />
+    <meta name="theme-color" content="#0b1016" />
+    <title>My MC v2 — Voxel Sandbox</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!--
+      Only the page background is inlined. Everything else is owned by
+      `src/styles/main.css`, which Vite emits as a render-blocking <link> in the
+      built page — so the card below is already styled before any JavaScript
+      runs. The inline rule only exists to prevent a white flash on slow
+      connections, where the stylesheet has not arrived yet.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0b1016;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      The loading card is static markup rather than something JavaScript builds.
+      Vite loads the application bundle as a module, so a JS-created overlay
+      would leave the player staring at a blank page for as long as the bundle
+      takes to download and parse. `BootOverlay` adopts this element and replaces
+      it on the first stage update, which is why the classes and test id match
+      the generated markup exactly.
+    -->
+    <div id="app" data-testid="app-root">
+      <div class="boot-screen boot-screen--loading" data-testid="boot-loading">
+        <div class="boot-screen__card">
+          <h1 class="boot-screen__title">正在启动</h1>
+          <p class="boot-screen__message">正在初始化引擎…</p>
+          <div class="boot-screen__progress" hidden>
+            <div class="boot-screen__progress-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <noscript>
+      <div class="boot-screen boot-screen--fatal">
+        <h1>需要启用 JavaScript</h1>
+        <p>本游戏完全在浏览器中运行，请启用 JavaScript 后刷新页面。</p>
+      </div>
+    </noscript>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
