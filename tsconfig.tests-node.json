@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "lib": ["ES2023"],
+    /**
+     * Node globals are granted only to the specs that genuinely need the file
+     * system. Keeping them out of `tsconfig.json` is deliberate: browser sources
+     * must not be able to reference `process` or `Buffer` and still type-check,
+     * because those do not exist in the browser at runtime.
+     */
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true
+  },
+  "include": ["tests/unit/architecture.test.ts"]
+}

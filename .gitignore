@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+.vite/
+stats.html
+
+# Test artifacts
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+.visual-baseline/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+logs/
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# TypeScript incremental build info
+*.tsbuildinfo

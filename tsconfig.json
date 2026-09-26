@@ -1,0 +1,51 @@
+{
+  "compilerOptions": {
+    /* I. Language & module semantics */
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    /* II. Emit: Vite owns the emit, tsc is only a type checker */
+    "noEmit": true,
+    "skipLibCheck": true,
+    "removeComments": false,
+
+    /* III. Strictness.
+       Every flag below is enabled on purpose: voxel engines mix chunk-local and
+       world-local coordinates and index into raw TypedArrays, which is exactly
+       where silent `undefined` and implicit `any` bugs hide. */
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+
+    /* IV. Import ergonomics */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src", "tests/unit", "tests/integration", "tests/support"],
+  /**
+   * The architecture guard reads the file system and therefore needs Node
+   * globals, which must stay out of browser sources. It is type-checked by
+   * `tsconfig.tests-node.json` instead.
+   */
+  "exclude": ["tests/unit/architecture.test.ts"]
+}

@@ -1,0 +1,19 @@
+# pnpm >= 10 keeps dependency lifecycle scripts blocked by default, and pnpm 12
+# expects the allow-list here rather than in package.json.
+#
+# Only two dependencies genuinely need a lifecycle script: esbuild installs its
+# platform binary and workerd (pulled in by wrangler) downloads a runtime.
+# Everything else stays blocked so a compromised transitive dependency cannot
+# execute code at install time.
+allowBuilds:
+  esbuild: true
+  workerd: true
+
+# Vitest 5.0.2 is newer than pnpm's default `minimumReleaseAge` quarantine
+# window. The exclusion is recorded explicitly so that CI installs stay
+# reproducible and it is obvious why these four entries bypass the policy.
+minimumReleaseAgeExclude:
+  - '@vitest/coverage-v8@5.0.2'
+  - '@vitest/mocker@5.0.2'
+  - '@vitest/spy@5.0.2'
+  - vitest@5.0.2
