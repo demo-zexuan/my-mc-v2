@@ -151,38 +151,47 @@ test.describe('gameplay', () => {
     await waitForMainMenu(page);
     await startNewWorld(page, 'e2e-move');
 
-    const before = await readPlayerPosition(page);
-
     await focusGame(page);
-    // I. Walk diagonally and hop.
-    // 1. The spawn point is procedural, so a straight line may run into a hill
-    //    within a block or two. Diagonal input slides along walls instead of
-    //    stopping dead, and hopping clears the one-block steps that terrain
-    //    generation produces constantly.
-    // 2. The assertion is displacement, not frames, because headless Chromium
-    //    renders through SwiftShader where a second of wall clock is a handful of
-    //    frames and the fixed-step loop clamps its catch-up work by design.
-    await page.keyboard.down('KeyW');
-    await page.keyboard.down('KeyA');
-    const hop = setInterval(() => {
-      void page.keyboard.press('Space').catch(() => {});
-    }, 400);
+    await page.waitForTimeout(500);
 
-    try {
-      await expect
-        .poll(
-          async () => {
-            const now = await readPlayerPosition(page);
-            return Math.hypot(now.x - before.x, now.z - before.z);
-          },
-          { timeout: 30_000, message: 'the player never moved' },
-        )
-        .toBeGreaterThan(1);
-    } finally {
-      clearInterval(hop);
-      await page.keyboard.up('KeyW');
-      await page.keyboard.up('KeyA');
+    // I. Try every direction and require one of them to work.
+    // 1. The spawn point is procedural, so a single direction may legitimately run
+    //    into a hill within a block. Testing "at least one direction moves the
+    //    player" is deterministic regardless of the terrain the seed produced,
+    //    while still failing loudly if the input pipeline is broken.
+    // 2. The assertion is displacement, not frames: headless Chromium renders
+    //    through SwiftShader, where a second of wall clock is a handful of frames
+    //    and the fixed-step loop clamps its catch-up work by design.
+    const directions = ['KeyW', 'KeyS', 'KeyA', 'KeyD'] as const;
+    let bestDistance = 0;
+
+    for (const key of directions) {
+      const before = await readPlayerPosition(page);
+      await page.keyboard.down(key);
+      try {
+        await expect
+          .poll(
+            async () => {
+              const now = await readPlayerPosition(page);
+              return Math.hypot(now.x - before.x, now.z - before.z);
+            },
+            { timeout: 8_000 },
+          )
+          .toBeGreaterThan(bestDistance);
+        const now = await readPlayerPosition(page);
+        bestDistance = Math.hypot(now.x - before.x, now.z - before.z);
+      } catch {
+        // This direction was blocked; the next one may not be.
+      } finally {
+        await page.keyboard.up(key);
+      }
+
+      if (bestDistance > 1) {
+        break;
+      }
     }
+
+    expect(bestDistance, 'no direction moved the player').toBeGreaterThan(1);
   });
 
   test('lets the player jump', async ({ page }) => {

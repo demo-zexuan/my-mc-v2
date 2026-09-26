@@ -175,6 +175,22 @@ const KEYFRAMES: readonly SkyKeyframe[] = [
 /** 月光颜色；夜晚的平行光方向取月亮方向，颜色单独指定以免继承日落的暖色。 */
 const MOON_LIGHT_COLOR = new THREE.Color(0xaec6ff);
 
+/**
+ * 地面反弹的反照率。
+ *
+ * 半球光的"地面项"代表从地面反射回天空的光：它是地平线色乘以地表反照率，而不是一个
+ * 固定的暗棕色。三个分量都在 1 以下且偏暖，用来近似被草地、泥土吸收后的暖色光。
+ */
+const GROUND_BOUNCE = new THREE.Color(0.3, 0.27, 0.22);
+
+/**
+ * 与法线无关的环境光占白天环境强度的比例。
+ *
+ * 0.22 是"树叶底面在白天读作深绿而不是纯黑"的下限附近：再小就会在阴影里回到接近黑色，
+ * 再大则会把夜景点亮成灰色、削弱平行光的明暗对比（单测里用"朝上/朝下的亮度比 ≥ 1.3"钉住）。
+ */
+const AMBIENT_FLOOR_RATIO = 0.22;
+
 /** 关键帧颜色对象缓存，避免每次采样都构造 `THREE.Color`。 */
 const KEYFRAME_COLORS: readonly {
   readonly zenith: THREE.Color;
@@ -697,7 +713,8 @@ export class Sky {
    *
    * 1. 太阳在地平线以上时，平行光沿太阳方向、取太阳色与太阳强度。
    * 2. 太阳落下后切换到月亮方向与月光强度，避免夜里变成纯黑（玩家会完全失去参照）。
-   * 3. 半球光提供环境项，颜色取天顶色与地平线色的混合。
+   * 3. 半球光提供方向性环境项：朝上的面拿天顶色，朝下的面拿地面反弹色。
+   * 4. 环境光提供与法线无关的底线，见下面的说明。
    */
   public syncEnvironment(rig: EnvironmentRig): void {
     const state = this.cycle.state;
@@ -709,8 +726,21 @@ export class Sky {
     rig.sunLight.intensity = sunAboveHorizon ? state.sunIntensity : state.moonIntensity;
     rig.sunLight.visible = rig.sunLight.intensity > 0.01;
 
+    // I. 半球光：天空项 + 地面反弹项。
+    // 1. 天空项用天顶色与地平线色混合，随昼夜变色。
     rig.hemisphereLight.intensity = state.ambientIntensity;
     rig.hemisphereLight.color.copy(state.zenithColor).lerp(state.horizonColor, 0.35);
+    // 2. 地面反弹项原来是一个固定的暗棕色，导致所有**朝下的面**（树叶底面、悬崖内侧）
+    //    在白天也只有一点点光，Lambert 算出来几乎是纯黑。这里改成"地平线色 × 地面反照率"：
+    //    地面越亮、天空越亮，反弹越强，白天和黄昏都能得到可见的深色而不是黑。
+    rig.hemisphereLight.groundColor.copy(state.horizonColor).multiply(GROUND_BOUNCE);
+
+    // II. 环境光：与法线无关的底线。
+    // 1. 半球光无法覆盖"朝下"这一整类面，环境光是它们唯一的保底光源。
+    // 2. 强度随昼夜相位缩放：白天约 0.28，夜晚按 ambientIntensity 的比例降到约 0.1，
+    //    既保证树叶底面是深绿而不是黑，也不会把夜晚洗成灰色。
+    rig.ambientLight.color.copy(state.zenithColor).lerp(state.horizonColor, 0.5);
+    rig.ambientLight.intensity = state.ambientIntensity * AMBIENT_FLOOR_RATIO;
   }
 
   /** 释放所有几何体与材质，并把天空从场景里移除。 */

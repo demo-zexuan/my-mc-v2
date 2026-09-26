@@ -115,7 +115,13 @@ const MAP_FRAGMENT_PATCH = /* glsl */ `#ifdef USE_MAP
 
 	vec2 atlasTileSize = vTileRect.zw - vTileRect.xy;
 	vec2 atlasUv = vTileRect.xy + fract( vMapUv ) * atlasTileSize;
-		vec4 sampledDiffuseColor = texture2D( map, atlasUv );	diffuseColor *= sampledDiffuseColor;
+	vec4 sampledDiffuseColor = textureGrad(
+		map,
+		atlasUv,
+		dFdx( vMapUv ) * atlasTileSize,
+		dFdy( vMapUv ) * atlasTileSize
+	);
+	diffuseColor *= sampledDiffuseColor;
 
 #endif
 `;

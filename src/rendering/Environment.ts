@@ -23,6 +23,20 @@ export interface EnvironmentRig {
   readonly hemisphereLight: THREE.HemisphereLight;
   /** The single shadow-casting sun/moon light. */
   readonly sunLight: THREE.DirectionalLight;
+  /**
+   * 与朝向无关的最小环境光。
+   *
+   * I. 为什么需要它（真实缺陷的直接修复）
+   *
+   * 1. 半球光的贡献取决于法线方向：朝上的面拿到天空色，朝下的面只拿到地面色。
+   *    树叶底面、悬崖内侧、洞穴顶这类"朝下的面"因此只吃到一点点地面反弹，
+   *    在 Lambert 下算出来几乎是纯黑——玩家站在树冠下抬头看到的就是一团黑。
+   * 2. 现实里的"天光"是经过多次散射的，并不严格按法线方向分布；用一盏很弱的环境光
+   *    近似这部分多次散射，就能保证任何朝向的面都还有底色，同时保留平行光的明暗对比。
+   * 3. 默认强度为 0：灯光装置本身不改变既有场景的观感，由 `Sky.syncEnvironment()`
+   *    按昼夜相位驱动（夜晚自然变暗，而不是永远一个亮度）。
+   */
+  readonly ambientLight: THREE.AmbientLight;
   /** Detaches every light from its parent and frees GPU-side state. */
   dispose(): void;
 }
@@ -77,15 +91,22 @@ export function createEnvironment(
   target.name = 'environment:sun-target';
   sunLight.target = target;
 
-  scene.add(hemisphereLight, sunLight, target);
+  // III. 最小环境光。
+  // 强度默认 0，由 Sky.syncEnvironment() 按昼夜相位驱动，见 EnvironmentRig 的说明。
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0);
+  ambientLight.name = 'environment:ambient';
+
+  scene.add(hemisphereLight, sunLight, target, ambientLight);
 
   return {
     hemisphereLight,
     sunLight,
+    ambientLight,
     dispose: (): void => {
       hemisphereLight.removeFromParent();
       sunLight.removeFromParent();
       target.removeFromParent();
+      ambientLight.removeFromParent();
       sunLight.shadow.dispose();
     },
   };

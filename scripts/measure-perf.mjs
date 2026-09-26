@@ -61,6 +61,8 @@ function parseArgs(argv) {
     channel: process.env['PERF_CHANNEL'] ?? null,
     build: true,
     warmupMs: 2500,
+    // 固定种子：否则 1280x720 与 640x360 会落在两个不同的世界，三角形数无法对比。
+    seed: process.env['PERF_SEED'] ?? 'perf-baseline',
   };
 
   for (const arg of argv) {
@@ -78,6 +80,7 @@ function parseArgs(argv) {
     else if (key === 'channel') options.channel = String(value);
     else if (key === 'no-build') options.build = false;
     else if (key === 'warmup') options.warmupMs = Number(value);
+    else if (key === 'seed') options.seed = String(value);
   }
 
   options.duration =
@@ -346,8 +349,61 @@ function classifyBackend(rendererString) {
 }
 
 // ---------------------------------------------------------------------------
-// 单次测量
+// 测量
 // ---------------------------------------------------------------------------
+
+/**
+ * 把页面推进到"世界里、正在渲染"的状态。
+ *
+ * I. 为什么要走主菜单流程
+ *
+ * Phase 0 的页面加载完就是烟雾场景，直接测 rAF 即可；接入真实游戏后启动落在主菜单，
+ * 菜单是纯 DOM（0 个 draw call、0 个三角形），此时测到的是**空转的 60 FPS**——数字
+ * 好看但完全没有意义（这是本脚本第一版踩过的坑）。因此必须按真实流程新建世界，并等到
+ * 调试面板报告区块数 > 0，才算"真的在渲染"。
+ *
+ * @param page - 页面。
+ * @param timeoutMs - 等待世界就绪的上限。
+ * @param seed - 世界种子；两个视口使用同一个种子，否则三角形数不可比。
+ * @returns 就绪时的已加载区块数。
+ */
+async function enterWorld(page, timeoutMs, seed) {
+  const newWorld = page.getByTestId('main-menu-new-world');
+  if ((await newWorld.count()) > 0) {
+    const seedInput = page.getByTestId('main-menu-seed');
+    if ((await seedInput.count()) > 0) {
+      await seedInput.fill(seed);
+    }
+    await newWorld.click({ timeout: 15_000 });
+  }
+
+  const readChunkCount = async () => {
+    const element = page.locator('[data-testid="debug-row-chunks"] .debug-overlay__value');
+    if ((await element.count()) === 0) {
+      return 0;
+    }
+    const match = /(\d+)/.exec(await element.innerText());
+    return match === null ? 0 : Number.parseInt(match[1], 10);
+  };
+
+  const deadline = Date.now() + timeoutMs;
+  let chunks = 0;
+  while (Date.now() < deadline) {
+    chunks = await readChunkCount();
+    if (chunks > 0) {
+      break;
+    }
+    await page.waitForTimeout(500);
+  }
+
+  if (chunks === 0) {
+    throw new Error(
+      '世界没有在超时时间内加载出任何区块，性能数字会是无意义的空转数据。' +
+        '请确认主菜单可以新建世界，或调试面板是否可见。',
+    );
+  }
+  return chunks;
+}
 
 /**
  * 在指定视口下测量一次。
@@ -372,7 +428,7 @@ async function measure(browser, baseUrl, viewport, options, bootTimeoutMs) {
   await page.addInitScript(installProbe);
   await page.goto(baseUrl, { waitUntil: 'load', timeout: bootTimeoutMs });
 
-  // 等引擎就绪：画布可见、启动遮罩消失、rAF 至少跑了 30 帧。
+  // 等引擎就绪：画布可见、启动遮罩消失。
   await page.waitForSelector('[data-testid="game-canvas"]', {
     timeout: bootTimeoutMs,
     state: 'visible',
@@ -382,6 +438,10 @@ async function measure(browser, baseUrl, viewport, options, bootTimeoutMs) {
     undefined,
     { timeout: bootTimeoutMs },
   );
+
+  // 主菜单 → 新建世界。跳过这一步会测到空转的菜单帧。
+  const loadedChunks = await enterWorld(page, bootTimeoutMs, options.seed);
+
   await page.waitForFunction(
     () => (globalThis.__DSH_PERF__?.drawCallsPerFrame.length ?? 0) > 30,
     undefined,
@@ -443,6 +503,7 @@ async function measure(browser, baseUrl, viewport, options, bootTimeoutMs) {
 
   return {
     viewport: `${viewport.width}x${viewport.height}`,
+    loadedChunks,
     backend,
     backendClass: classifyBackend(backend.renderer),
     frames: summariseFrames(sample.frames),
@@ -589,6 +650,7 @@ async function main() {
 
     const payload = {
       generatedAt: new Date().toISOString(),
+      seed: options.seed,
       gitHead: process.env['GIT_HEAD'] ?? null,
       mode: options.headed ? 'headed' : 'headless',
       channel: options.channel ?? 'bundled-chromium',

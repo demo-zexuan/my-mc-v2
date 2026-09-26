@@ -9,7 +9,7 @@ import {
   type BlockAccessor,
   type ChunkMeshGroup,
 } from '@/rendering/ChunkMesher';
-import type { BlockFace, TileLookup } from '@/rendering/textures/BlockAtlas';
+import type { TileLookup } from '@/rendering/textures/BlockAtlas';
 
 /**
  * 贪心合并的几何不变量。
@@ -83,8 +83,8 @@ function quadsOf(group: ChunkMeshGroup, kind: 'opaque' | 'transparent'): QuadVie
     const other = [0, 1, 2].filter((value) => value !== axis);
     const u = other[0] ?? 0;
     const v = other[1] ?? 1;
-    const us = corners.map((corner) => corner[u]);
-    const vs = corners.map((corner) => corner[v]);
+    const us = corners.map((corner) => corner[u] ?? 0);
+    const vs = corners.map((corner) => corner[v] ?? 0);
 
     quads.push({
       group: kind,
@@ -122,37 +122,32 @@ function checkPlanarAndWound(group: ChunkMeshGroup): void {
       group.indices[i + 2] ?? 0,
       group.indices[i + 5] ?? 0,
     ];
-    const at = (index: number): readonly number[] => [
+    const at = (index: number): readonly [number, number, number] => [
       group.positions[index * 3] ?? 0,
       group.positions[index * 3 + 1] ?? 0,
       group.positions[index * 3 + 2] ?? 0,
     ];
     const [pa, pb, pc, pd] = [at(a), at(b), at(c), at(d)];
     // 三角形 (a, b, c) 的几何法线方向必须与顶点法线一致。
-    const ab = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
-    const ac = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
-    const cross = [
-      (ab[1] ?? 0) * (ac[2] ?? 0) - (ab[2] ?? 0) * (ac[1] ?? 0),
-      (ab[2] ?? 0) * (ac[0] ?? 0) - (ab[0] ?? 0) * (ac[2] ?? 0),
-      (ab[0] ?? 0) * (ac[1] ?? 0) - (ab[1] ?? 0) * (ac[0] ?? 0),
+    const ab: readonly [number, number, number] = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+    const ac: readonly [number, number, number] = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
+    const cross: readonly [number, number, number] = [
+      ab[1] * ac[2] - ab[2] * ac[1],
+      ab[2] * ac[0] - ab[0] * ac[2],
+      ab[0] * ac[1] - ab[1] * ac[0],
     ];
-    const normal = [
+    const normal: readonly [number, number, number] = [
       group.normals[a * 3] ?? 0,
       group.normals[a * 3 + 1] ?? 0,
       group.normals[a * 3 + 2] ?? 0,
     ];
-    const dot =
-      (cross[0] ?? 0) * (normal[0] ?? 0) +
-      (cross[1] ?? 0) * (normal[1] ?? 0) +
-      (cross[2] ?? 0) * (normal[2] ?? 0);
+    const dot = cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2];
     expect(dot).toBeGreaterThan(0);
 
     // 第四个角必须落在前三者确定的平面上。
     const planeDot =
-      normal[0] * ((pd[0] ?? 0) - (pa[0] ?? 0)) +
-      normal[1] * ((pd[1] ?? 0) - (pa[1] ?? 0)) +
-      normal[2] * ((pd[2] ?? 0) - (pa[2] ?? 0));
-    expect(Math.abs(planeDot ?? 0)).toBeLessThan(1e-5);
+      normal[0] * (pd[0] - pa[0]) + normal[1] * (pd[1] - pa[1]) + normal[2] * (pd[2] - pa[2]);
+    expect(Math.abs(planeDot)).toBeLessThan(1e-5);
   }
 }
 
@@ -176,8 +171,8 @@ function naiveVisibleFaces(chunk: Chunk, accessor: BlockAccessor): number {
             y + dy,
             chunk.cz * CHUNK_SIZE_Z + lz + dz,
           ) as BlockId;
-          const hidden =
-            isOpaque(neighbour) || (neighbour === id && isTransparent(id) && id !== BlockId.Air);
+          // 上面的 continue 已经排除了空气，因此这里只需判断"同种透明方块"。
+          const hidden = isOpaque(neighbour) || (neighbour === id && isTransparent(id));
           if (!hidden) {
             count += 1;
           }
