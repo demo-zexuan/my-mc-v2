@@ -187,7 +187,9 @@ pnpm run deploy                     # = build + wrangler pages deploy dist
 | `CLOUDFLARE_API_TOKEN`  | Cloudflare API Token，权限 `Cloudflare Pages: Edit` |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账户 ID                                  |
 
-缺少 Secret 时工作流会**明确报错**而不是静默跳过。
+未配置 Secret 时：**生产构建仍然会执行并作为 artifact 上传**，只有上传步骤被跳过，同时
+在工作流中输出一条明确的提示。这样 `main` 分支不会因为一个可选的部署配置而常态飘红，
+也不会出现"静默部署了空内容"的情况。
 
 ### 方式三：Cloudflare Pages Git 集成
 

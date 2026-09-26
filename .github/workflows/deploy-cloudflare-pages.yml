@@ -13,8 +13,15 @@
 #   CLOUDFLARE_API_TOKEN   token with the "Cloudflare Pages: Edit" permission
 #   CLOUDFLARE_ACCOUNT_ID  account id that owns the Pages project
 #
-# Set them under Settings -> Secrets and variables -> Actions. The job fails with
-# a clear message when they are missing instead of uploading nothing.
+# Set them under Settings -> Secrets and variables -> Actions.
+#
+# III. Behaviour when the secrets are missing
+#
+# The build always runs, because a broken production build must fail the
+# workflow. Only the upload step is skipped, with an explicit notice pointing at
+# the README. Failing the whole workflow instead would paint `main` red for a
+# condition that is a configuration choice rather than a defect, which trains
+# people to ignore a red badge.
 
 name: Deploy to Cloudflare Pages
 
@@ -50,25 +57,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Verify Cloudflare credentials are configured
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          missing=0
-          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
-            echo "::error::Secret CLOUDFLARE_API_TOKEN is not set."
-            missing=1
-          fi
-          if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
-            echo "::error::Secret CLOUDFLARE_ACCOUNT_ID is not set."
-            missing=1
-          fi
-          if [ "${missing}" -ne 0 ]; then
-            echo "See README.md -> Deployment for how to create the token."
-            exit 1
-          fi
-
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -86,7 +74,30 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Check Cloudflare credentials
+        id: credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "${CLOUDFLARE_API_TOKEN}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+            echo "Cloudflare credentials found; the build will be published."
+          else
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice title=Cloudflare deployment skipped::CLOUDFLARE_API_TOKEN and/or CLOUDFLARE_ACCOUNT_ID are not configured. The production build succeeded; see README.md -> Deployment for how to enable publishing."
+          fi
+
+      - name: Upload production build
+        # Always available, so a skipped deployment can still be inspected.
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-main
+          path: dist
+          retention-days: 7
+
       - name: Deploy to Cloudflare Pages
+        if: steps.credentials.outputs.present == 'true'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
