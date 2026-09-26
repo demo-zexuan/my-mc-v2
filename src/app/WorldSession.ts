@@ -134,6 +134,8 @@ export class WorldSession {
   #gameTimeTicks: number;
   #playTimeMs = 0;
   #facing = '北';
+  /** Reused buffer for the look direction; the HUD refresh runs every frame. */
+  readonly #lookScratch: Vec3 = { x: 0, y: 0, z: 0 };
 
   public constructor(options: WorldSessionOptions) {
     this.#options = options;
@@ -286,6 +288,49 @@ export class WorldSession {
     this.#hud.show();
 
     this.#wireEvents();
+    this.#wirePointerLock();
+  }
+
+  /**
+   * Acquires pointer lock when the player clicks the world.
+   *
+   * I. Why this has to be explicit
+   *
+   * `InputManager` only accumulates mouse look while the pointer is locked, and
+   * the browser only grants a lock from inside a user gesture. Nothing called
+   * `requestPointerLock()` at all, so the pointer was never captured and the camera
+   * could not be turned — the single most important control in a first-person game
+   * was simply absent, and no test caught it because the unit tests drive the input
+   * manager directly while the browser suite never asserts on camera rotation.
+   *
+   * II. Why the click is the trigger rather than entering the world
+   *
+   * Entering a world happens after several `await`s, so by the time the session
+   * exists the gesture that started it may already have expired. Making "click the
+   * world to look around" the contract matches every first-person game, and it also
+   * gives the player a way back after pressing Escape.
+   */
+  #wirePointerLock(): void {
+    const canvas = this.#options.renderer.domElement;
+    this.#pointerDownListener = (): void => {
+      if (this.#disposed || !this.#options.state.interactive) {
+        return;
+      }
+      this.#input.requestPointerLock();
+    };
+    canvas.addEventListener('pointerdown', this.#pointerDownListener);
+
+    this.#stateUnsubscribe = this.#options.state.onChange((change) => {
+      // Input focus follows the game state: keystrokes typed into a menu must not
+      // move the player, and the accumulated delta of a paused frame must not be
+      // applied when play resumes.
+      this.#input.setEnabled(change.info.interactive);
+    });
+    this.#input.setEnabled(this.#options.state.interactive);
+
+    // A best-effort attempt while the menu click may still count as a gesture.
+    // Failing here is harmless: the click handler above is the reliable path.
+    this.#input.requestPointerLock();
   }
 
   /** Kick-off: warms the spawn area and places the player on solid ground. */
@@ -370,8 +415,6 @@ export class WorldSession {
     this.#worldRenderer.update(this.world, this.camera);
     this.#sky.update(deltaSeconds, this.camera.position);
 
-    this.#syncLighting();
-
     // I. HUD refresh. Reading the snapshot once keeps the three widgets showing
     //    the same inventory state within a frame.
     const snapshot = this.inventory.snapshot();
@@ -392,6 +435,11 @@ export class WorldSession {
         ? {}
         : { label: `${definitionOf(selected.item).displayName} ×${selected.count}` }),
     });
+
+    // I. The facing label is derived from the camera, not stored.
+    // 1. It was a constant, so the HUD claimed "北" no matter where the player
+    //    looked — both a wrong readout and a wasted debugging signal.
+    this.#facing = this.#facingFromLook();
 
     const position = player.position;
     const chunk = this.world.chunkOf(position.x, position.z);
@@ -584,6 +632,16 @@ export class WorldSession {
     }
     this.#unsubscribe.length = 0;
 
+    this.#stateUnsubscribe?.();
+    this.#stateUnsubscribe = null;
+    if (this.#pointerDownListener !== null) {
+      this.#options.renderer.domElement.removeEventListener(
+        'pointerdown',
+        this.#pointerDownListener,
+      );
+      this.#pointerDownListener = null;
+    }
+
     this.#options.save.stopAutosave();
     this.#streamer.dispose();
     this.#pool.dispose();
@@ -612,6 +670,8 @@ export class WorldSession {
   readonly #pendingUnloads: Chunk[] = [];
 
   #unsubscribe: (() => void)[] = [];
+  #pointerDownListener: (() => void) | null = null;
+  #stateUnsubscribe: (() => void) | null = null;
 
   #wireEvents(): void {
     const bus = this.#options.bus;
@@ -665,6 +725,27 @@ export class WorldSession {
     if (!locked && this.#options.state.current === 'playing') {
       this.togglePause(true);
     }
+  }
+
+  /**
+   * Compass label for the current view direction.
+   *
+   * I. Convention
+   *
+   * Negative Z is north, matching the direction a fresh world faces. The dominant
+   * horizontal axis decides the quadrant, which is what a compass readout needs;
+   * exact bearings would only add noise to a HUD row.
+   *
+   * @returns One of 北 / 东 / 南 / 西.
+   */
+  #facingFromLook(): string {
+    const direction = this.#lookScratch;
+    this.#playerController.cameraRig.lookDirection(direction);
+
+    if (Math.abs(direction.x) > Math.abs(direction.z)) {
+      return direction.x > 0 ? '东' : '西';
+    }
+    return direction.z > 0 ? '南' : '北';
   }
 
   /** Casts from the eye along the view direction and converts to an interaction hit. */
@@ -811,25 +892,6 @@ export class WorldSession {
         ? hotbarSlots + (index % (snapshot.slots.length - hotbarSlots))
         : index % hotbarSlots;
     this.inventory.moveSlot(index, target);
-  }
-
-  /** Applies the day/night state to the scene lighting and fog. */
-  #syncLighting(): void {
-    const skyState = this.#sky.state;
-    this.#environment.sunLight.position.set(
-      this.camera.position.x + skyState.sunDirection.x * 200,
-      skyState.sunDirection.y * 200,
-      this.camera.position.z + skyState.sunDirection.z * 200,
-    );
-    // The sun light covers both the day and the night term: below the horizon the
-    // cycle reports a moon intensity instead, and the world must not go black.
-    const direct = Math.max(skyState.sunIntensity, skyState.moonIntensity);
-    this.#environment.sunLight.intensity = direct * 2.2;
-    this.#environment.sunLight.color.copy(
-      skyState.sunIntensity >= skyState.moonIntensity ? skyState.sunColor : skyState.horizonColor,
-    );
-    this.#environment.hemisphereLight.intensity = skyState.ambientIntensity;
-    this.#environment.hemisphereLight.color.copy(skyState.horizonColor);
   }
 
   async #saveAndQuit(): Promise<void> {

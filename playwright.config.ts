@@ -29,11 +29,18 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
-  // `exactOptionalPropertyTypes` rejects an explicit `undefined` for an optional
-  // option, so the CI-only limit is applied by conditional spread.
-  ...(isCI ? { workers: 1 } : {}),
+  // I. Always one worker.
+  // 1. Every spec drives a full voxel world through SwiftShader software rendering.
+  //    Running them concurrently starves the CPU, so a 45 s budget that is generous
+  //    in isolation is not enough under load: two specs timed out or measured a
+  //    half-streamed world, which is a false negative that costs more to diagnose
+  //    than the parallel run saves. The suite is 24 specs; serial execution is
+  //    only about a minute.
+  workers: 1,
 
-  timeout: 45_000,
+  // Chunk streaming, world creation and the first frames all happen inside a
+  // spec, and software rendering makes each of them slow.
+  timeout: 90_000,
   expect: { timeout: 15_000 },
 
   reporter: isCI

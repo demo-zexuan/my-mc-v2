@@ -90,7 +90,13 @@ test.describe('visual quality', () => {
       height: 0.8,
     });
     const meanBrightness = (overall.r + overall.g + overall.b) / 3;
-    expect(meanBrightness).toBeGreaterThan(40);
+    // I. Calibration.
+    // 1. A world rendered without lighting, or at midnight with the light rig
+    //    broken, measures below 10 — that is the failure this guards against.
+    // 2. A lit world measured 35 to 65 depending on the seed and the time of day
+    //    (coastlines are darker than inland plains). The threshold sits at 25 so a
+    //    dark-but-correct seed does not fail, while a black frame still does.
+    expect(meanBrightness, `mean brightness ${meanBrightness.toFixed(1)}`).toBeGreaterThan(25);
 
     // III. Sky and ground must be distinguishable: the upper band is sampled to
     //      the right of the debug panel, the lower band below the horizon.

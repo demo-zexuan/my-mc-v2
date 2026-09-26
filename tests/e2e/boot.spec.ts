@@ -194,6 +194,37 @@ test.describe('gameplay', () => {
     expect(bestDistance, 'no direction moved the player').toBeGreaterThan(1);
   });
 
+  test('turns the camera when the player moves the mouse', async ({ page }) => {
+    await page.goto('/');
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-look');
+    await waitForWorldReady(page);
+
+    const facingBefore = await page.getByTestId('hud').locator('[data-row="facing"]').innerText();
+
+    const box = await page.getByTestId('game-canvas').boundingBox();
+    expect(box).not.toBeNull();
+    const centreX = (box?.x ?? 0) + (box?.width ?? 0) / 2;
+    const centreY = (box?.y ?? 0) + (box?.height ?? 0) / 2;
+
+    // I. Hold the primary button across the movement.
+    // 1. Pointer lock is the primary look channel, but a browser only grants it to
+    //    a focused document. Automated and embedded contexts fall back to
+    //    drag-to-look, and driving both paths the same way keeps this test valid
+    //    wherever it runs.
+    await page.mouse.move(centreX, centreY);
+    await page.mouse.down();
+    for (let step = 0; step < 12; step += 1) {
+      await page.mouse.move(centreX + (step + 1) * 60, centreY, { steps: 3 });
+      await page.waitForTimeout(60);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+
+    const facingAfter = await page.getByTestId('hud').locator('[data-row="facing"]').innerText();
+    expect(facingAfter, 'the view direction never changed').not.toBe(facingBefore);
+  });
+
   test('lets the player jump', async ({ page }) => {
     await page.goto('/');
     await waitForMainMenu(page);

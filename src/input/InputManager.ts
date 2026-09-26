@@ -141,6 +141,10 @@ export class InputManager {
 
   #pointerLocked = false;
   #paused = false;
+  /** 是否处于"按住左键拖拽转向"回退模式。 */
+  #lookDragging = false;
+  /** 左键是否按住；与拖拽回退配对。 */
+  #primaryButtonDown = false;
   #enabled = true;
   #disposed = false;
 
@@ -402,6 +406,8 @@ export class InputManager {
     this.#lookDx = 0;
     this.#lookDy = 0;
     this.#wheelDelta = 0;
+    this.#lookDragging = false;
+    this.#primaryButtonDown = false;
   }
 
   #attach(): void {
@@ -502,6 +508,14 @@ export class InputManager {
     if (this.#disposed) {
       return;
     }
+
+    // 回退转向只在左键按住期间生效；`Mouse0` 同时仍作为 `attack` 动作上报，
+    // 因此"按住左键挖掘"与"按住左键拖拽转向"是同一次按压的两个消费者。
+    if (event.button === 0) {
+      this.#primaryButtonDown = true;
+      this.#lookDragging = !this.#pointerLocked;
+    }
+
     const code = mouseCode(event.button);
     if (!this.#down.has(code)) {
       this.#pressed.add(code);
@@ -510,6 +524,11 @@ export class InputManager {
   };
 
   #onMouseUp = (event: MouseEvent): void => {
+    if (event.button === 0) {
+      this.#primaryButtonDown = false;
+      this.#lookDragging = false;
+    }
+
     if (this.#disposed) {
       return;
     }
@@ -520,12 +539,25 @@ export class InputManager {
   };
 
   #onMouseMove = (event: MouseEvent): void => {
-    // I. 只在锁定时累积视角；未锁定时的移动是玩家在操作 UI。
-    // 2. 非有限值必须挡在门外：远端桌面、录屏工具的合成事件可能给出 NaN，
-    //    一旦写进相机角度就再也回不来。
-    if (this.#disposed || !this.#pointerLocked || !this.#enabled || this.#paused) {
+    if (this.#disposed || !this.#enabled || this.#paused) {
       return;
     }
+
+    // I. 优先使用指针锁定下的裸位移。
+    // II. 指针锁定不可用时回退到"按住左键拖拽转向"。
+    // 1. 有些环境根本拿不到锁定：无焦点窗口、内嵌 iframe（被 `allow` 策略拒绝）、
+    //    部分移动端浏览器。此前这些环境下鼠标完全无法转向 —— 第一人称游戏最重要
+    //    的操作直接失效，而单元测试直接驱动 InputManager，浏览器测试又没有断言镜头
+    //    旋转，所以缺陷一路漏到玩家手里。
+    // 2. 拖拽是这类场景的标准回退：不需要锁定，也不会因为指针离开画布而丢失控制。
+    const dragging = this.#lookDragging && this.#primaryButtonDown;
+    if (!this.#pointerLocked && !dragging) {
+      // 未锁定的自由移动属于玩家在操作 UI。
+      return;
+    }
+
+    // 3. 非有限值必须挡在门外：远端桌面、录屏工具的合成事件可能给出 NaN，
+    //    一旦写进相机角度就再也回不来。
     const dx = event.movementX;
     const dy = event.movementY;
     if (Number.isFinite(dx)) {
