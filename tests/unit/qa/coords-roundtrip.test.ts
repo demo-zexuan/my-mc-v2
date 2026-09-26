@@ -160,14 +160,31 @@ describe('coords: world <-> chunk <-> local conversion', () => {
 
 describe('coords: chunkKey packing', () => {
   it('round-trips every chunk in a 513x513 neighbourhood, negatives included', () => {
+    // I. Mismatches are collected and asserted once.
+    // 1. `expect` inside a 263,169-iteration loop spends most of its time
+    //    building assertion contexts; on a slower CI runner that pushed the test
+    //    past the default 5 s timeout. Accumulating the failures keeps the check
+    //    exhaustive, reports every offending coordinate instead of only the
+    //    first, and runs in a fraction of the time.
+    const mismatches: string[] = [];
+
     for (let cx = -256; cx <= 256; cx += 1) {
       for (let cz = -256; cz <= 256; cz += 1) {
         const key = chunkKey(cx, cz);
-        expect(Number.isSafeInteger(key), `key for (${cx},${cz}) is not a safe integer`).toBe(true);
-        expect(chunkKeyToCoord(key)).toEqual({ cx, cz });
+        if (!Number.isSafeInteger(key)) {
+          mismatches.push(`(${cx},${cz}) produced a non-safe integer key ${key}`);
+          continue;
+        }
+        const decoded = chunkKeyToCoord(key);
+        if (decoded.cx !== cx || decoded.cz !== cz) {
+          mismatches.push(`(${cx},${cz}) -> ${key} -> (${decoded.cx},${decoded.cz})`);
+        }
       }
     }
-  });
+
+    expect(mismatches.slice(0, 10)).toEqual([]);
+    expect(mismatches).toHaveLength(0);
+  }, 30_000);
 
   it('produces distinct keys over that neighbourhood', () => {
     const keys = new Set<number>();
