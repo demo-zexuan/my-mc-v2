@@ -112,6 +112,12 @@ export interface PlayerMovementTuning {
   readonly coyoteTime: number;
   /** 跳跃缓冲窗口（秒）。 */
   readonly jumpBufferTime: number;
+  /** 飞行时的水平速度（格/秒）。 */
+  readonly flySpeed: number;
+  /** 飞行时的竖直速度（格/秒）。 */
+  readonly flyVerticalSpeed: number;
+  /** 飞行时的速度逼近率（格/秒²）；比地面更大，手感更"听话"。 */
+  readonly flyAcceleration: number;
 }
 
 /** 默认手感参数，见模块注释中的表格。 */
@@ -126,6 +132,11 @@ export const DEFAULT_MOVEMENT_TUNING: PlayerMovementTuning = {
   maxFallSpeed: 78.4,
   coyoteTime: 0.1,
   jumpBufferTime: 0.15,
+  // 飞行参数取 MC 创造模式的量级：水平明显快于疾跑，竖直略慢于水平，
+  // 这样"上下调整高度"是可控的而不是瞬间贴顶。
+  flySpeed: 10.9,
+  flyVerticalSpeed: 7.5,
+  flyAcceleration: 56,
 };
 
 /** 无输入时的中性意图。 */
@@ -177,6 +188,22 @@ export class PlayerController {
 
   #coyoteTimer = 0;
   #jumpBufferTimer = 0;
+  /**
+   * 是否处于飞行模式。
+   *
+   * I. 为什么双击空格而不是单独一个按键
+   *
+   * 1. 这与玩家的既有肌肉记忆一致（MC 创造模式），不需要在 HUD 上新增提示。
+   * 2. 飞行是"改变物理规则"的开关：一旦开启，重力不再作用；把它放在一个会被
+   *    误触的键位上，玩家会在挖矿时突然飘起来。
+   */
+  #flying = false;
+  /** 上一次"刚按下跳跃"的累计时间，用于识别双击。 */
+  #lastJumpPressAt = Number.NEGATIVE_INFINITY;
+  /** 累计模拟时间，仅用于双击判定，不参与物理（避免受固定步长之外的影响）。 */
+  #elapsedSeconds = 0;
+  /** 双击判定窗口（秒）。 */
+  static readonly DOUBLE_TAP_WINDOW = 0.3;
   #fallPeakY = 0;
   #wishX = 0;
   #wishZ = 0;
@@ -242,6 +269,31 @@ export class PlayerController {
   }
 
   /** 是否站在地面上。 */
+  /** 是否处于飞行模式。 */
+  public get flying(): boolean {
+    return this.#flying;
+  }
+
+  /**
+   * 显式设置飞行模式。
+   *
+   * @param flying - 目标状态；进入飞行会立即清除下坠速度，避免"关了重力还在掉"。
+   */
+  public setFlying(flying: boolean): void {
+    if (this.#flying === flying) {
+      return;
+    }
+    this.#flying = flying;
+    this.#player.velocity.y = 0;
+    this.#jumpBufferTimer = 0;
+  }
+
+  /** 在飞行与步行之间切换。 */
+  public toggleFlying(): boolean {
+    this.setFlying(!this.#flying);
+    return this.#flying;
+  }
+
   public get onGround(): boolean {
     return this.#player.onGround;
   }
@@ -307,6 +359,30 @@ export class PlayerController {
     const intent = input?.moveIntent() ?? NEUTRAL_MOVE_INTENT;
     const jumpPressed = input?.wasActionPressed('jump') ?? false;
     const wasOnGround = player.onGround;
+    this.#elapsedSeconds += dt;
+
+    // I. 双击空格切换飞行。
+    // 1. 用"刚按下"而不是"按住"：按住 Space 在步行时是连跳，在飞行时是上升，
+    //    两者都不应该与切换飞行冲突。
+    if (jumpPressed && input !== null) {
+      const previous = this.#lastJumpPressAt;
+      this.#lastJumpPressAt = this.#elapsedSeconds;
+      if (this.#elapsedSeconds - previous <= PlayerController.DOUBLE_TAP_WINDOW) {
+        this.toggleFlying();
+        // 本次按下已经"用掉"，不应该再触发一次跳跃或上升。
+        this.#jumpBufferTimer = 0;
+        return this.#advanceFlight(dt, intent);
+      }
+    }
+    // 2. 静止超过窗口后重置，避免"两次相隔很久的跳跃"被误判为双击。
+    if (this.#elapsedSeconds - this.#lastJumpPressAt > PlayerController.DOUBLE_TAP_WINDOW) {
+      this.#lastJumpPressAt = Number.NEGATIVE_INFINITY;
+    }
+
+    if (this.#flying) {
+      this.#advanceFlight(dt, intent);
+      return;
+    }
 
     // II. 计时器。
     // 1. 跳跃缓冲：把"刚按下"扩展成一个时间窗口，落地前后极短时间内的按下都算数。
@@ -475,6 +551,64 @@ export class PlayerController {
    * 2. 同时按下两个相反方向时 `f` 或 `r` 为 0，向量自然抵消。
    * 3. 斜向输入的长度为 `sqrt(2)`，必须归一化，否则斜着走比直着走快 41%。
    */
+  /**
+   * 推进一个飞行步。
+   *
+   * I. 与步行共用水平速度模型，只替换竖直方向
+   *
+   * 1. 水平仍然走 `moveTowardsHorizontal`，所以"加速/减速"的手感一致，只是把目标速度
+   *    换成飞行速度、把逼近率换成飞行加速度。
+   * 2. 竖直不做重力积分，而是直接给目标速度：飞行时玩家期望"按一下升一点"，而不是
+   *    像抛物线一样冲过头。
+   * 3. 位移仍然交给 `moveBody`，因此飞行也不会穿墙 —— 飞行模式只取消重力，不取消碰撞。
+   *
+   * @param dt - 固定步长（秒），已夹紧。
+   * @param intent - 本步的移动意图。
+   */
+  #advanceFlight(dt: number, intent: MoveIntent): void {
+    const player = this.#player;
+
+    const sprinting = intent.sprint && intent.forward;
+    const targetSpeed = sprinting ? this.#tuning.flySpeed * 1.6 : this.#tuning.flySpeed;
+    this.#computeWish(intent.forward, intent.back, intent.left, intent.right);
+    moveTowardsHorizontal(
+      player.velocity,
+      player.velocity,
+      this.#wishX * targetSpeed,
+      this.#wishZ * targetSpeed,
+      this.#tuning.flyAcceleration * dt,
+    );
+
+    // 上升用跳跃键，下降用潜行键；两者同时按下时互相抵消，保持悬停。
+    const vertical = (intent.jump ? 1 : 0) - (intent.sneak ? 1 : 0);
+    const targetVertical = vertical * this.#tuning.flyVerticalSpeed;
+    // 直接逼近目标竖直速度而不是积分重力：飞行时玩家要的是"按一下升一点"，
+    // 抛物线式的加速会让人冲过想要的高度。
+    const verticalStep = this.#tuning.flyAcceleration * dt;
+    player.velocity.y =
+      player.velocity.y < targetVertical
+        ? Math.min(targetVertical, player.velocity.y + verticalStep)
+        : Math.max(targetVertical, player.velocity.y - verticalStep);
+
+    copyVec3(this.#previousEye, this.#eye);
+
+    const velocity = player.velocity;
+    this.#displacement.x = velocity.x * dt;
+    this.#displacement.y = velocity.y * dt;
+    this.#displacement.z = velocity.z * dt;
+
+    const result: MoveResult = moveBody(this.#world, player.body, this.#displacement);
+    player.setPosition(result.position.x, result.position.y, result.position.z);
+    player.onGround = result.onGround;
+
+    // 飞行时撞墙同样要清零分量，否则贴墙滑行会累积出弹射速度。
+    if (result.blockedX) velocity.x = 0;
+    if (result.blockedZ) velocity.z = 0;
+    if (result.blockedY) velocity.y = 0;
+
+    player.eyePosition(this.#eye);
+  }
+
   #computeWish(forward: boolean, back: boolean, left: boolean, right: boolean): void {
     const forwardAmount = (forward ? 1 : 0) - (back ? 1 : 0);
     const rightAmount = (right ? 1 : 0) - (left ? 1 : 0);

@@ -44,6 +44,7 @@ import { ParticleSystem } from '@/particles/ParticleSystem';
 import { PLAYER_EYE_HEIGHT } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
 import { BlockOutline } from '@/rendering/BlockOutline';
+import { MiningOverlay } from '@/rendering/MiningOverlay';
 import { createEnvironment, type EnvironmentRig } from '@/rendering/Environment';
 import { DayNightCycle, Sky } from '@/rendering/Sky';
 import { WorldRenderer } from '@/rendering/WorldRenderer';
@@ -111,6 +112,7 @@ export class WorldSession {
   readonly #environment: EnvironmentRig;
   readonly #atlas: BlockAtlas;
   readonly #outline: BlockOutline;
+  readonly #miningOverlay: MiningOverlay;
   readonly #worldRenderer: WorldRenderer;
   readonly #dayNight: DayNightCycle;
   readonly #sky: Sky;
@@ -173,6 +175,9 @@ export class WorldSession {
     // outline the only feedback is the crosshair changing shape, which is invisible
     // when the crosshair is already over a solid surface.
     this.#outline = new BlockOutline(this.scene);
+    // Without this the player holds the button and sees nothing change until the
+    // block vanishes, which reads as "breaking does not work".
+    this.#miningOverlay = new MiningOverlay(this.scene);
     this.#worldRenderer = new WorldRenderer(this.scene, { atlas: this.#atlas });
     // I. Only a restored world reuses its saved clock.
     // 1. `timeOfDay` is 0 at midnight, so seeding a *new* world from
@@ -367,9 +372,17 @@ export class WorldSession {
 
     // II. Interaction.
     const hit = this.#raycast();
-    if (this.#selector.update(hit)) {
-      this.#mining.setTarget(hit);
-    }
+    // I. The mining system is told the current target every step, not only when
+    //    the selection changes.
+    // 1. Feeding it only on change left it holding a block that no longer existed
+    //    the moment that block was destroyed: `tick` then saw a mismatch between
+    //    its remembered block and the world, reset the progress and returned, so
+    //    keeping the crosshair still stopped mining entirely. It only appeared to
+    //    work while the view was moving, because movement kept refreshing the
+    //    target. `setTarget` is idempotent for an unchanged target, so calling it
+    //    per step costs nothing and removes the whole staleness class.
+    this.#selector.update(hit);
+    this.#mining.setTarget(this.#selector.current);
 
     const attacking = this.#options.state.interactive && this.#input.isActionDown('attack');
     this.#mining.tick(deltaSeconds, attacking);
@@ -427,6 +440,10 @@ export class WorldSession {
     // 1. The outline follows the block under the crosshair and is hidden when there
     //    is no target, so the player always knows what a click would affect.
     this.#outline.update(this.#selector.current);
+    this.#miningOverlay.update(
+      this.#selector.current,
+      this.#options.state.interactive ? this.#mining.progress : 0,
+    );
 
     const selected = snapshot.slots[snapshot.selected] ?? null;
     this.#crosshair.update({
@@ -513,6 +530,14 @@ export class WorldSession {
     drops: number;
     particles: number;
     timeTicks: number;
+    /** Mining progress of the current target in `0..1`. */
+    miningProgress: number;
+    /** Whether the primary button is being held and the game accepts input. */
+    attacking: boolean;
+    /** Whether a block is currently under the crosshair. */
+    hasTarget: boolean;
+    /** Whether the player is flying. */
+    flying: boolean;
   } {
     const streamStats = this.#streamer.stats;
     return {
@@ -522,6 +547,10 @@ export class WorldSession {
       drops: this.#drops.count,
       particles: this.#particles.activeCount,
       timeTicks: this.#gameTimeTicks,
+      miningProgress: this.#mining.progress,
+      attacking: this.#input.isActionDown('attack') && this.#options.state.interactive,
+      hasTarget: this.#selector.hasTarget,
+      flying: this.#playerController.flying,
     };
   }
 
@@ -653,6 +682,7 @@ export class WorldSession {
     this.#sky.dispose();
     this.#atlas.dispose();
     this.#outline.dispose();
+    this.#miningOverlay.dispose();
     this.#environment.dispose();
 
     this.#crosshair.dispose();

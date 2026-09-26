@@ -58,6 +58,9 @@ const WORLD_ROWS: readonly DebugRow[] = [
   { key: 'time', label: 'Time' },
   { key: 'entities', label: 'Drops' },
   { key: 'particles', label: 'Particles' },
+  { key: 'mining', label: 'Mining' },
+  { key: 'input', label: 'Input' },
+  { key: 'fly', label: 'Fly' },
 ];
 
 /** Version label shown on the main menu. */
@@ -204,6 +207,15 @@ export class GameApp {
         this.#openSettings();
       },
       version: APP_VERSION,
+      // The default hint block does not mention mining progress, flight or the
+      // drag-to-look fallback, all of which are things a new player has to know.
+      controlHints: [
+        'WASD 移动 · 空格 跳跃 · Shift 疾跑 · Ctrl 潜行',
+        '按住左键 挖掘（方块会逐渐变暗）· 右键 放置',
+        '双击空格 切换飞行 · 飞行时空格上升 / Shift 下降',
+        '滚轮 或 1-9 切换物品 · E 背包 · Esc 暂停 · F3 调试',
+        '指针锁定不可用时按住左键拖拽转向',
+      ],
       onOpen: () => {
         if (this.#state.current === 'boot') {
           this.#state.transition('menu');
@@ -353,6 +365,9 @@ export class GameApp {
       overlay.set('chunks', '—');
       overlay.set('entities', '—');
       overlay.set('particles', '—');
+      overlay.set('mining', '—');
+      overlay.set('input', '—');
+      overlay.set('fly', '—');
       overlay.set('time', '—');
       return;
     }
@@ -372,6 +387,15 @@ export class GameApp {
     overlay.set('seed', session.seedLabel);
     overlay.set('entities', String(worldStats.drops));
     overlay.set('particles', String(worldStats.particles));
+    // Two rows that make the interaction chain observable: a crosshair with no
+    // target, a held button that the game is ignoring, and a mining timer that is
+    // not advancing are three different bugs that used to look identical.
+    overlay.set('mining', `${(worldStats.miningProgress * 100).toFixed(0)}%`);
+    overlay.set(
+      'input',
+      `attack=${worldStats.attacking ? 'on' : 'off'} target=${worldStats.hasTarget ? 'yes' : 'no'}`,
+    );
+    overlay.set('fly', worldStats.flying ? 'on (double-tap Space)' : 'off');
     overlay.set('time', `${Math.round(worldStats.timeTicks)} t`);
   }
 

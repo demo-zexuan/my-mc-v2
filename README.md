@@ -4,10 +4,10 @@
 > 工程化优先：类型严格、测试分层、CI 质量门禁、可重复部署到 Cloudflare Pages。
 
 [![CI](https://github.com/demo-zexuan/my-mc-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/demo-zexuan/my-mc-v2/actions/workflows/ci.yml)
+[![Live demo](https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E8%AF%95%E7%8E%A9-my--mc--v2.pages.dev-orange)](https://my-mc-v2.pages.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-<!-- 部署完成后替换为真实的 Pages 地址 -->
-<!-- [在线试玩](https://my-mc-v2.pages.dev) -->
+[![Cloudflare Pages](https://img.shields.io/badge/Live%20demo-my--mc--v2.pages.dev-orange)](https://my-mc-v2.pages.dev)
 
 ## 游戏画面
 
