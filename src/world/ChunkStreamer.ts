@@ -30,7 +30,8 @@ import type { ChunkGenerationSource } from '@/workers/WorkerPool';
 
 import { logger } from '@/utils/logger';
 
-import { World } from './World';
+import { type Chunk } from './Chunk';
+import { type World } from './World';
 import { chunkKey } from './coords';
 
 const log = logger.child('streaming');
@@ -302,7 +303,7 @@ export class ChunkStreamer {
     }
   }
 
-  #onEditedChunkUnloaded: ((chunk: import('./Chunk').Chunk) => void) | null = null;
+  #onEditedChunkUnloaded: ((chunk: Chunk) => void) | null = null;
 
   /**
    * Registers the handler invoked when an edited chunk leaves the view distance.
@@ -310,7 +311,7 @@ export class ChunkStreamer {
    * @param handler - Receives the chunk so it can be persisted before being
    *        dropped from memory.
    */
-  public setOnEditedChunkUnloaded(handler: (chunk: import('./Chunk').Chunk) => void): void {
+  public setOnEditedChunkUnloaded(handler: (chunk: Chunk) => void): void {
     this.#onEditedChunkUnloaded = handler;
   }
 }

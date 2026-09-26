@@ -29,9 +29,9 @@
 
 import * as THREE from 'three';
 
-import { AudioManager } from '@/audio/AudioManager';
-import { materialForBlockName } from '@/audio/SoundBank';
-import { EventBus } from '@/engine/events/EventBus';
+import { type AudioManager } from '@/audio/AudioManager';
+import { materialForBlockName, soundNameFor } from '@/audio/SoundBank';
+import { type EventBus } from '@/engine/events/EventBus';
 import { DropSystem } from '@/entities/DropSystem';
 import { InputManager } from '@/input/InputManager';
 import { BlockInteraction } from '@/interaction/BlockInteraction';
@@ -61,6 +61,7 @@ import { NoticeStack } from '@/ui/NoticeStack';
 import { PauseMenu } from '@/ui/PauseMenu';
 import { WorkerPool } from '@/workers/WorkerPool';
 import { BlockId, definitionOf } from '@/world/BlockRegistry';
+import { type Chunk } from '@/world/Chunk';
 import { ChunkStreamer } from '@/world/ChunkStreamer';
 import { World } from '@/world/World';
 import { blockToLocal } from '@/world/coords';
@@ -270,6 +271,14 @@ export class WorldSession {
       },
     });
 
+    // I. HUD widgets start hidden.
+    // 1. They are created hidden so a caller can build them before the world is
+    //    ready without flashing placeholder text. Entering a world is exactly the
+    //    moment they must appear.
+    this.#crosshair.show();
+    this.#hotbar.show();
+    this.#hud.show();
+
     this.#wireEvents();
   }
 
@@ -325,7 +334,9 @@ export class WorldSession {
     // IV. Streaming and autosave.
     const position = this.#playerController.player.position;
     this.#streamer.update(position.x, position.z);
-    this.#options.save.tickAutosave();
+    // The autosave path reports failures through the bus instead of rejecting, so
+    // the promise is intentionally not awaited on the simulation hot path.
+    void this.#options.save.tickAutosave();
 
     // V. Clear the edge-triggered input state.
     // 1. `wasActionPressed` is only true for one step. Without this call the flags
@@ -548,7 +559,7 @@ export class WorldSession {
   }
 
   /** Chunks unloaded while out of range, awaiting the next save. */
-  readonly #pendingUnloads: import('@/world/Chunk').Chunk[] = [];
+  readonly #pendingUnloads: Chunk[] = [];
 
   #unsubscribe: (() => void)[] = [];
 
@@ -561,7 +572,9 @@ export class WorldSession {
     this.#unsubscribe.push(
       bus.on('block:broken', ({ block, x, y, z }) => {
         const material = materialForBlockName(definitionOf(block).name);
-        audio.playSound(`block.break.${material}`, { position: { x, y, z } });
+        // Built through the helper rather than by string concatenation so the
+        // material-to-sound mapping stays a single source of truth.
+        audio.playSound(soundNameFor('break', material), { position: { x, y, z } });
       }),
       bus.on('block:placed', ({ x, y, z }) => {
         audio.playSound('block.place', { position: { x, y, z } });

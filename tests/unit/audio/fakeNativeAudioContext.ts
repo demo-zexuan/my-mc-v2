@@ -22,8 +22,11 @@
 export class FakeNativeAudioParam {
   public value: number;
   public readonly context: FakeNativeAudioContext;
-  public readonly automation: { readonly kind: string; readonly value: number; readonly time: number }[] =
-    [];
+  public readonly automation: {
+    readonly kind: string;
+    readonly value: number;
+    readonly time: number;
+  }[] = [];
 
   public constructor(context: FakeNativeAudioContext, initial = 1) {
     this.context = context;

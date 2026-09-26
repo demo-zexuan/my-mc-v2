@@ -230,45 +230,31 @@ describe('World: non-integer coordinates', () => {
     expect(world.isSolidAt(1.5, 10, 0)).toBe(false);
   });
 
-  it.fails('is expected to reject a fractional write (claimed fix, not yet in src)', () => {
-    // FIXME/QA-BLOCKER: the owner reported `setBlock` rejects non-integer
-    // coordinates, but the guard landed only in `getBlock` and in the
-    // `generateChunkNow` sink — `World.setBlock` / `Chunk.setBlock` still accept
-    // them and then report a change that never happened.
-    //
-    // `it.fails` inverts the assertion: it passes while the defect exists and
-    // fails as soon as `setBlock` really returns `false`, which is the signal to
-    // flip this into a normal `it(...)`.
-    const { world } = createWorld3x3();
-    const chunk = world.getChunk(0, 0);
-    clearDirtyFlags(world);
-
-    expect(world.setBlock(1.5, 10, 0, BlockId.Stone)).toBe(false);
-    expect(world.setBlock(1, 10.5, 0, BlockId.Stone)).toBe(false);
-    expect(chunk?.getEdits()).toEqual([]);
-    expect(dirtyLabels(world)).toEqual([]);
-  });
-
-  it('currently reports success for a fractional write while storing nothing', () => {
-    // Characterisation of the defect above, kept so the behaviour is evidence
-    // rather than an anecdote. A fractional X produces the flat index 2561.5;
-    // the typed-array write is silently dropped, but the chunk is marked dirty,
-    // a fractional index enters the edit log (and from there the save file), and
-    // because the lz === 0 branch fires unconditionally the (0,-1) neighbour is
-    // marked dirty too.
-    //
-    // Reproduce: world.setBlock(1.5, 10, 0, BlockId.Stone) === true while
-    //            world.getBlock(1, 10, 0) === Air and the edit log holds 2561.5.
+  it('rejects a fractional write without marking anything dirty', () => {
+    // Regression: `setBlock` used to accept non-integer coordinates. A fractional
+    // X produced the flat index $2561.5$; the typed-array write was silently
+    // dropped while the method still returned `true`, marked the chunk (and a
+    // bogus neighbour) dirty and recorded `{index: 2561.5}` in the edit log — which
+    // the save layer then persisted. It now rejects the write outright.
     const { world } = createWorld3x3();
     const chunk = world.getChunk(0, 0);
     expect(chunk).toBeDefined();
     clearDirtyFlags(world);
 
-    expect(world.setBlock(1.5, 10, 0, BlockId.Stone)).toBe(true);
+    expect(world.setBlock(1.5, 10, 0, BlockId.Stone)).toBe(false);
+    expect(world.setBlock(1, 10.5, 0, BlockId.Stone)).toBe(false);
+    expect(world.setBlock(0.25, 10, 3.75, BlockId.Stone)).toBe(false);
+    expect(world.setBlock(1, 10, -0.5, BlockId.Stone)).toBe(false);
+
+    expect(chunk?.getEdits()).toEqual([]);
+    expect(chunk?.modified).toBe(false);
+    expect(dirtyLabels(world)).toEqual([]);
+
+    // The rejection is complete: nothing was stored at either neighbouring
+    // integer coordinate, and the height map is untouched.
     expect(world.getBlock(1, 10, 0)).toBe(BlockId.Air);
     expect(world.getBlock(2, 10, 0)).toBe(BlockId.Air);
-    expect(chunk?.getEdits()).toEqual([{ index: 2561.5, id: BlockId.Stone }]);
-    expect(dirtyLabels(world)).toEqual(['0,-1', '0,0']);
+    expect(world.surfaceHeightAt(1, 0)).toBe(4);
   });
 
   it('rejects a NaN X/Z before it reaches a chunk', () => {
@@ -314,34 +300,27 @@ describe('World: generation bookkeeping', () => {
     expect(world.hasChunk(11, 11)).toBe(true);
   });
 
-  it('leaves the pending entry behind when adoptGeneratedChunk rejects a payload', () => {
-    // PENDING FIX: the owner reported a `try/finally` for this path, but it landed
-    // in `generateChunkNow` only. `adoptGeneratedChunk` still throws out of the
-    // `Chunk` constructor before it can clear the pending entry, so a streaming
-    // layer that trusts `isPending` never retries that chunk — it stays
-    // "generating" for the rest of the session. The permanent hole is bounded
-    // (one chunk) and the payload only arrives malformed from a buggy worker, which
-    // is why this is low severity. The companion `it.fails` below asserts the
-    // intended behaviour and will alert when the fix lands.
+  it('clears the pending entry when adoptGeneratedChunk rejects a payload', () => {
+    // Regression: the `try/finally` was applied to `generateChunkNow` first and
+    // `adoptGeneratedChunk` kept the old code, so a malformed worker payload threw
+    // out of the `Chunk` constructor before `#pending.delete` ran. A streaming
+    // layer that trusts `isPending` would then never retry that chunk: it stayed
+    // "generating" for the rest of the session and left a permanent hole in the
+    // world. The pending entry must not survive an exception.
     const { world } = createWorld3x3();
     world.beginGeneration(12, 12);
+    expect(world.isPending(12, 12)).toBe(true);
 
     expect(() => world.adoptGeneratedChunk(12, 12, new Uint8Array(10))).toThrow(RangeError);
     expect(world.hasChunk(12, 12)).toBe(false);
-    expect(world.isPending(12, 12)).toBe(true);
-    expect(world.stats().pendingChunks).toBe(1);
-  });
+    expect(world.isPending(12, 12)).toBe(false);
+    expect(world.stats().pendingChunks).toBe(0);
 
-  it.fails('is expected to clear pending when adoptGeneratedChunk rejects a payload', () => {
-    // QA: same claim as above, isolated so that a partial fix is still visible.
-    // The `try/finally` was applied to `generateChunkNow`, not to
-    // `adoptGeneratedChunk`; `it.fails` passes while the pending entry survives
-    // and starts failing once the fix lands (then flip it to `it`).
-    const { world } = createWorld3x3();
-    world.beginGeneration(13, 13);
-
-    expect(() => world.adoptGeneratedChunk(13, 13, new Uint8Array(10))).toThrow(RangeError);
-    expect(world.isPending(13, 13)).toBe(false);
+    // And the chunk must be retryable afterwards.
+    expect(world.beginGeneration(12, 12)).toBe(true);
+    world.adoptGeneratedChunk(12, 12, new Uint8Array(16 * 128 * 16));
+    expect(world.hasChunk(12, 12)).toBe(true);
+    expect(world.isPending(12, 12)).toBe(false);
   });
 
   it('ignores every out-of-range or fractional generator write', () => {

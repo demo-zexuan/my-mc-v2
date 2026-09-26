@@ -141,7 +141,8 @@ export class GameApp {
     this.#mainMenu?.dispose();
     this.#settingsScreen?.dispose();
     this.#debugOverlay?.dispose();
-    this.#audio?.dispose();
+    // `dispose()` closes the AudioContext and therefore returns a promise.
+    void this.#audio?.dispose();
     this.#save?.dispose();
     this.#bus.clear();
 
@@ -461,7 +462,7 @@ export class GameApp {
       return;
     }
 
-    let hasSave = false;
+    let hasSave: boolean;
     try {
       hasSave = (await save.listWorlds()).length > 0;
     } catch {
@@ -524,7 +525,9 @@ export class GameApp {
   }
 
   #unlockAudio = (): void => {
-    this.#audio?.unlock();
+    // `unlock()` resolves to a boolean; the caller has nothing to do with it, and
+    // an unhandled floating promise would trip the lint gate.
+    void this.#audio?.unlock();
   };
 
   #onKeyDown = (event: KeyboardEvent): void => {
@@ -540,9 +543,13 @@ export class GameApp {
     }
 
     // I. Shortcuts are state dependent.
-    // 1. The inventory only opens from `playing`; the pause menu owns Escape while
-    //    it is open, so `togglePause` is called without a target state.
-    if (event.code === 'KeyE' && this.#state.current === 'playing') {
+    // 1. `inventory` must be accepted as well as `playing`: opening the panel
+    //    moves the game into the `inventory` state, so a check for `playing`
+    //    alone let the player open the bag but never close it with the same key.
+    if (
+      event.code === 'KeyE' &&
+      (this.#state.current === 'playing' || this.#state.current === 'inventory')
+    ) {
       event.preventDefault();
       session.toggleInventory();
       return;

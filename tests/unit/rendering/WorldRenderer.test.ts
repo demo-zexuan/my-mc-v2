@@ -356,4 +356,20 @@ describe('WorldRenderer 图集 UV 着色器补丁', () => {
     expect(shader.fragmentShader).toContain('atlasUv');
     expect(shader.fragmentShader).not.toContain('#include <map_fragment>');
   });
+
+  it('用 textureGrad + 折叠前的解析导数选 mip，避免接缝取到最粗一级', () => {
+    const shader = {
+      vertexShader: '#include <common>\n#include <uv_vertex>',
+      fragmentShader: '#include <common>\n#include <map_fragment>',
+    };
+
+    patchAtlasUvShader(shader);
+
+    // fract() 会让折叠后的 uv 在每条方块边界上不连续；若硬件据此求导，
+    // 缝上会选到"整张图集的平均色"，即水面横纹 / 沙地点阵的根因。
+    expect(shader.fragmentShader).toContain('textureGrad(');
+    expect(shader.fragmentShader).toContain('dFdx( vMapUv ) * atlasTileSize');
+    expect(shader.fragmentShader).toContain('dFdy( vMapUv ) * atlasTileSize');
+    expect(shader.fragmentShader).not.toContain('texture2D( map, atlasUv )');
+  });
 });

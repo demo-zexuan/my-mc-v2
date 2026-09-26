@@ -50,7 +50,10 @@ function createBrowserManager(): {
   vi.stubGlobal('AudioContext', function AudioContextStub(): FakeNativeAudioContext {
     return native;
   });
-  const audio = new AudioManager({ logger: silentLogger(), createContext: createBrowserAudioContext });
+  const audio = new AudioManager({
+    logger: silentLogger(),
+    createContext: createBrowserAudioContext,
+  });
   return { audio, native };
 }
 
@@ -174,8 +177,7 @@ describe('createBrowserAudioContext', () => {
 
 describe('applySettings before unlock', () => {
   it('is safe to call before a user gesture and is applied on unlock', async () => {
-    const native = new FakeNativeAudioContext();
-    const audio = new AudioManager({ logger: silentLogger() });
+    const { audio, native } = createBrowserManager();
 
     // 启动阶段先应用设置：此时节点图还不存在，不应抛异常。
     expect(() =>
@@ -191,5 +193,25 @@ describe('applySettings before unlock', () => {
     expect(native.gains[0]?.gain.value).toBeCloseTo(0.09, 6);
 
     await audio.dispose();
+  });
+});
+
+describe('adapted context live values', () => {
+  it('reports state and currentTime from the native context, not a creation-time snapshot', async () => {
+    const native = new FakeNativeAudioContext();
+    vi.stubGlobal('AudioContext', function AudioContextStub(): FakeNativeAudioContext {
+      return native;
+    });
+    const adapter = createBrowserAudioContext();
+
+    expect(adapter.state).toBe('suspended');
+    native.currentTime = 12.5;
+    expect(adapter.currentTime).toBeCloseTo(12.5, 6);
+
+    await adapter.resume();
+
+    // 若 `state` 在适配时被展开固化成静态值，这里会读到 'suspended'，
+    // 并导致 AudioManager.unlock() 永远返回 false（游戏无声）。
+    expect(adapter.state).toBe('running');
   });
 });

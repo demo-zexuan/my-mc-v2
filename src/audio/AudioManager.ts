@@ -748,8 +748,7 @@ function adaptAudioContext(context: AudioContext): AudioContextLike {
       native.linearRampToValueAtTime(value, endTime),
     exponentialRampToValueAtTime: (value: number, endTime: number): unknown =>
       native.exponentialRampToValueAtTime(value, endTime),
-    cancelScheduledValues: (startTime: number): unknown =>
-      native.cancelScheduledValues(startTime),
+    cancelScheduledValues: (startTime: number): unknown => native.cancelScheduledValues(startTime),
   });
 
   const wrapGain = (native: GainNode): GainNodeLike =>
@@ -830,8 +829,28 @@ function adaptAudioContext(context: AudioContext): AudioContextLike {
   const wrapPanner = (native: StereoPannerNode): StereoPannerNodeLike =>
     register({ ...linkable(native), pan: param(native.pan) }, native);
 
-  // II. 上下文本体
-  const base = {
+  // II. 可选能力：缺失时不要定义该属性。
+  // 1. `exactOptionalPropertyTypes` 下 `createBiquadFilter: undefined` 不可赋值给可选方法，
+  //    因此用条件展开而不是赋 undefined。
+  const optional = {
+    ...(typeof context.createBiquadFilter === 'function'
+      ? {
+          createBiquadFilter: (): BiquadFilterNodeLike => wrapFilter(context.createBiquadFilter()),
+        }
+      : {}),
+    ...(typeof context.createStereoPanner === 'function'
+      ? {
+          createStereoPanner: (): StereoPannerNodeLike => wrapPanner(context.createStereoPanner()),
+        }
+      : {}),
+  };
+
+  // III. 一次性构造上下文本体。
+  // 1. **不要**先把带 getter 的对象字面量存进变量再 `{ ...base }`：展开会调用 getter 并把
+  //    求值结果固化成静态属性，于是 `state` 会永远停在被创建时的 `'suspended'`，
+  //    `unlock()` 永远等不到 `running`——游戏静默无声，且没有任何报错。
+  // 2. 因此 `state`/`currentTime`/`sampleRate` 必须是这个最终对象上的实时取值器。
+  return {
     get state(): AudioContextStateLike {
       // `AudioContextState` 只有 closed/running/suspended，是收窄接口的子集，无需断言。
       return context.state;
@@ -852,25 +871,8 @@ function adaptAudioContext(context: AudioContext): AudioContextLike {
     resume: (): Promise<void> => context.resume(),
     suspend: (): Promise<void> => context.suspend(),
     close: (): Promise<void> => context.close(),
+    ...optional,
   };
-
-  // III. 可选能力：缺失时不要定义该属性。
-  // 1. `exactOptionalPropertyTypes` 下 `createBiquadFilter: undefined` 不可赋值给可选方法，
-  //    因此用条件展开而不是赋 undefined。
-  const optional = {
-    ...(typeof context.createBiquadFilter === 'function'
-      ? {
-          createBiquadFilter: (): BiquadFilterNodeLike => wrapFilter(context.createBiquadFilter()),
-        }
-      : {}),
-    ...(typeof context.createStereoPanner === 'function'
-      ? {
-          createStereoPanner: (): StereoPannerNodeLike => wrapPanner(context.createStereoPanner()),
-        }
-      : {}),
-  };
-
-  return { ...base, ...optional };
 }
 
 /** `start(when?)` 的空参数调用与带参调用在 DOM 里是两个重载，这里归一化。 */
@@ -890,4 +892,3 @@ function scheduleStop(target: { stop(when?: number): void }, when: number | unde
     target.stop(when);
   }
 }
-

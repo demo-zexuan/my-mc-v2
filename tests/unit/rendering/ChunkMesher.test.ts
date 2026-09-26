@@ -305,6 +305,23 @@ describe('ChunkMesher 面剔除', () => {
     expect(data.transparent.indices).toHaveLength(0);
     expect(EMPTY_ACCESSOR.getBlock(0, 0, 0)).toBe(BlockId.Air);
   });
+
+  it('按最高非空气方块裁剪扫描范围不会漏面', () => {
+    // 高处孤立方块：扫描范围被裁到 y=121，但这 6 个面必须照样输出。
+    const high = makeChunk();
+    high.setBlock(7, 120, 7, BlockId.Lamp, false);
+    expect(mesh(high).stats.unitFaces).toBe(6);
+
+    // 世界最高层的方块：上方在区块外，必须走访问器并判定为空气。
+    const top = makeChunk();
+    top.setBlock(1, 127, 1, BlockId.Stone, false);
+    expect(mesh(top).stats.unitFaces).toBe(6);
+
+    // 只有一格高的地形也不会因为裁剪而丢掉底面（底面被基岩遮挡 → 5 面）。
+    const shallow = makeChunk();
+    shallow.setBlock(3, 0, 3, BlockId.Stone, false);
+    expect(mesh(shallow).stats.unitFaces).toBe(5);
+  });
 });
 
 describe('ChunkMesher 透明组分离', () => {

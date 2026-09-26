@@ -3,24 +3,28 @@ import { expect, test } from '@playwright/test';
 import {
   collectDiagnostics,
   expectNoSevereDiagnostics,
-  waitForEngineReady,
+  focusGame,
+  readPlayerPosition,
+  startNewWorld,
+  waitForMainMenu,
+  waitForWorldReady,
 } from './support/harness';
 
 /**
- * Boot and interaction smoke tests.
+ * Boot and platform smoke tests.
  *
  * I. Scope
  *
- * These assertions cover the accessibility of the loop to the player: the page
- * loads, the engine initialises, the canvas is actually rendering, the debug
- * view can be toggled, and nothing was logged as an error along the way.
+ * These assertions cover everything before gameplay: the page loads, the engine
+ * initialises a real WebGL 2 context, the menu appears and the frame loop runs
+ * without logging anything severe.
  */
 test.describe('engine boot', () => {
-  test('initialises the renderer and starts the frame loop', async ({ page }) => {
+  test('initialises the renderer and reaches the main menu', async ({ page }) => {
     const diagnostics = collectDiagnostics(page);
 
     await page.goto('/');
-    await waitForEngineReady(page);
+    await waitForMainMenu(page);
 
     // The rendering context must be a real WebGL 2 context; a canvas element
     // alone would also be produced by a failed initialisation.
@@ -33,39 +37,41 @@ test.describe('engine boot', () => {
       return {
         ok: context !== null,
         reason: context === null ? 'context missing' : 'ok',
-        width: canvas.width,
-        height: canvas.height,
-        drawingBufferWidth: context?.drawingBufferWidth ?? 0,
-        drawingBufferHeight: context?.drawingBufferHeight ?? 0,
+        width: context?.drawingBufferWidth ?? 0,
+        height: context?.drawingBufferHeight ?? 0,
       };
     });
 
     expect(contextInfo.reason).toBe('ok');
-    expect(contextInfo.ok).toBe(true);
-    expect(contextInfo.drawingBufferWidth).toBeGreaterThan(0);
-    expect(contextInfo.drawingBufferHeight).toBeGreaterThan(0);
+    expect(contextInfo.width).toBeGreaterThan(0);
+    expect(contextInfo.height).toBeGreaterThan(0);
+
+    // The menu must describe the controls; a menu that lost its hint block would
+    // leave new players with no idea what to press.
+    await expect(page.getByTestId('main-menu-controls')).toContainText('WASD');
 
     expectNoSevereDiagnostics(diagnostics);
   });
 
-  test('reports draw calls and triangles once rendering', async ({ page }) => {
+  test('reports no severe diagnostics while a world is created', async ({ page }) => {
+    const diagnostics = collectDiagnostics(page);
+
     await page.goto('/');
-    await waitForEngineReady(page);
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-diagnostics');
 
-    const drawCalls = await page.getByTestId('debug-row-drawCalls').innerText();
-    const triangles = await page.getByTestId('debug-row-triangles').innerText();
-
-    expect(Number.parseInt(drawCalls.replace(/[^0-9]/g, ''), 10)).toBeGreaterThan(0);
-    expect(Number.parseInt(triangles.replace(/[^0-9]/g, ''), 10)).toBeGreaterThan(0);
+    expectNoSevereDiagnostics(diagnostics);
   });
 
   test('toggles the debug overlay with F3', async ({ page }) => {
     await page.goto('/');
-    await waitForEngineReady(page);
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-f3');
 
     const overlay = page.getByTestId('debug-overlay');
     await expect(overlay).toBeVisible();
 
+    await focusGame(page);
     await page.keyboard.press('F3');
     await expect(overlay).toBeHidden();
 
@@ -75,12 +81,13 @@ test.describe('engine boot', () => {
 
   test('keeps rendering while the viewport is resized', async ({ page }) => {
     await page.goto('/');
-    await waitForEngineReady(page);
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-resize');
 
     await page.setViewportSize({ width: 800, height: 600 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
 
     // A resize that forgets `updateProjectionMatrix` still renders, but the
     // drawing buffer would no longer match the new size.
@@ -97,5 +104,162 @@ test.describe('engine boot', () => {
     expect(sizes.clientWidth).toBe(1440);
     expect(sizes.clientHeight).toBe(900);
     expect(sizes.bufferWidth).toBeGreaterThanOrEqual(1440);
+  });
+});
+
+/**
+ * Gameplay interaction: the acceptance list from the project brief, expressed as
+ * browser assertions.
+ */
+test.describe('gameplay', () => {
+  test('generates a voxel world with terrain and chunks', async ({ page }) => {
+    await page.goto('/');
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-world');
+
+    // Streaming fills the view distance over several frames. `waitForWorldReady`
+    // only proves that *some* chunk exists, so the count is polled here: under
+    // SwiftShader a single read can land while the world is still half loaded.
+    await expect
+      .poll(
+        async () => {
+          const text = await page.getByTestId('debug-row-chunks').innerText();
+          return Number.parseInt(/(\d+)/.exec(text)?.[1] ?? '0', 10);
+        },
+        { timeout: 45_000, message: 'the view distance never filled in' },
+      )
+      .toBeGreaterThan(50);
+
+    const chunks = await page.getByTestId('debug-row-chunks').innerText();
+    const triangles = await page.getByTestId('debug-row-triangles').innerText();
+    const drawCalls = await page.getByTestId('debug-row-drawCalls').innerText();
+
+    const chunkCount = Number.parseInt(/(\d+)/.exec(chunks)?.[1] ?? '0', 10);
+    const triangleCount = Number.parseInt(triangles.replace(/[^0-9]/g, ''), 10);
+    const drawCallCount = Number.parseInt(drawCalls.replace(/[^0-9]/g, ''), 10);
+
+    expect(chunkCount).toBeGreaterThan(50);
+    expect(triangleCount).toBeGreaterThan(5_000);
+    // The mesher must batch faces per chunk. One draw call per face would put this
+    // number in the tens of thousands and the frame rate on the floor.
+    expect(drawCallCount).toBeGreaterThan(0);
+    expect(drawCallCount).toBeLessThan(chunkCount * 4);
+  });
+
+  test('lets the player move with WASD', async ({ page }) => {
+    await page.goto('/');
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-move');
+
+    const before = await readPlayerPosition(page);
+
+    await focusGame(page);
+    // I. Walk diagonally and hop.
+    // 1. The spawn point is procedural, so a straight line may run into a hill
+    //    within a block or two. Diagonal input slides along walls instead of
+    //    stopping dead, and hopping clears the one-block steps that terrain
+    //    generation produces constantly.
+    // 2. The assertion is displacement, not frames, because headless Chromium
+    //    renders through SwiftShader where a second of wall clock is a handful of
+    //    frames and the fixed-step loop clamps its catch-up work by design.
+    await page.keyboard.down('KeyW');
+    await page.keyboard.down('KeyA');
+    const hop = setInterval(() => {
+      void page.keyboard.press('Space').catch(() => {});
+    }, 400);
+
+    try {
+      await expect
+        .poll(
+          async () => {
+            const now = await readPlayerPosition(page);
+            return Math.hypot(now.x - before.x, now.z - before.z);
+          },
+          { timeout: 30_000, message: 'the player never moved' },
+        )
+        .toBeGreaterThan(1);
+    } finally {
+      clearInterval(hop);
+      await page.keyboard.up('KeyW');
+      await page.keyboard.up('KeyA');
+    }
+  });
+
+  test('lets the player jump', async ({ page }) => {
+    await page.goto('/');
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-jump');
+
+    await focusGame(page);
+    await page.waitForTimeout(300);
+    const ground = await readPlayerPosition(page);
+
+    await page.keyboard.press('Space');
+    // Sample during the arc rather than after landing.
+    let peak = ground.y;
+    for (let sample = 0; sample < 12; sample += 1) {
+      await page.waitForTimeout(60);
+      const now = await readPlayerPosition(page);
+      peak = Math.max(peak, now.y);
+    }
+
+    expect(peak).toBeGreaterThan(ground.y + 0.2);
+  });
+
+  test('opens the inventory and returns to the game', async ({ page }) => {
+    await page.goto('/');
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-inventory');
+
+    await focusGame(page);
+    await page.keyboard.press('KeyE');
+    await expect(page.getByTestId('inventory-screen')).toBeVisible();
+
+    // The panel must own the pointer while it is open; otherwise clicks fall
+    // through to the canvas and the player mines the block behind it.
+    const pointerEvents = await page
+      .getByTestId('inventory-screen')
+      .evaluate((element) => window.getComputedStyle(element).pointerEvents);
+    expect(pointerEvents).not.toBe('none');
+
+    await page.keyboard.press('KeyE');
+    await expect(page.getByTestId('inventory-screen')).toBeHidden();
+  });
+
+  test('shows the pause menu after the pointer lock is released', async ({ page }) => {
+    await page.goto('/');
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-pause');
+    await waitForWorldReady(page);
+
+    await focusGame(page);
+    await page.waitForTimeout(300);
+
+    // Escape is handled two ways: the browser may swallow it into the pointer-lock
+    // machinery, and the application also handles the key event itself. Playwright
+    // dispatches a trusted key event, so the application path is exercised here.
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(600);
+
+    await expect(page.getByTestId('pause-menu')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('pause-menu-resume')).toBeVisible();
+  });
+
+  test('returns to the menu and enters a second world', async ({ page }) => {
+    await page.goto('/');
+    await waitForMainMenu(page);
+    await startNewWorld(page, 'e2e-first');
+
+    await focusGame(page);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(600);
+
+    const quit = page.getByTestId('pause-menu-quit');
+    await expect(quit).toBeVisible({ timeout: 10_000 });
+    await quit.click();
+
+    await expect(page.getByTestId('main-menu')).toBeVisible({ timeout: 30_000 });
+    await startNewWorld(page, 'e2e-second');
+    await waitForWorldReady(page);
   });
 });

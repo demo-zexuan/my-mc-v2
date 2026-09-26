@@ -260,9 +260,7 @@ export class IndexedDbSaveStorage implements SaveStorage {
     const db = await this.#open();
     const tx = db.transaction(WORLD_STORE_NAME, 'readonly');
     const done = transactionDone(tx);
-    const values = await requestResult<unknown[]>(
-      tx.objectStore(WORLD_STORE_NAME).getAll(),
-    );
+    const values = await requestResult<unknown[]>(tx.objectStore(WORLD_STORE_NAME).getAll());
     await done;
     return values;
   }

@@ -346,15 +346,12 @@ describe('Chunk: bounds handling and dirty flags', () => {
     expect(chunk.lightDirty).toBe(true);
   });
 
-  it.fails('is expected to raise lightDirty after applyEdits (its own doc says so)', () => {
-    // QA-BLOCKER (low): `markLightClean` documents that the flag "is set by every
-    // block change and by `applyEdits`", but `applyEdits` only sets `#meshDirty`.
-    // Restoring a save file therefore leaves lighting marked clean: a lighting
-    // pass that had already acknowledged the chunk would never rebuild it, and
-    // the restored edits would be lit as if they were not there.
-    //
-    // `it.fails` passes while the defect exists and fails once `applyEdits` raises
-    // the flag — then flip this into a normal `it(...)`.
+  it('raises lightDirty again after applyEdits', () => {
+    // Regression: `markLightClean` documents that the flag "is set by every block
+    // change and by `applyEdits`", but `applyEdits` only raised `#meshDirty`.
+    // Restoring a save file therefore left lighting marked clean: a lighting pass
+    // that had already acknowledged the chunk never rebuilt it, and the restored
+    // edits were lit as if they were not there.
     const chunk = new Chunk(0, 0);
     chunk.markLightClean();
     expect(chunk.lightDirty).toBe(false);
@@ -363,6 +360,7 @@ describe('Chunk: bounds handling and dirty flags', () => {
 
     expect(chunk.getBlock(1, 0, 1)).toBe(BlockId.Stone);
     expect(chunk.lightDirty).toBe(true);
+    expect(chunk.meshDirty).toBe(true);
   });
 });
 

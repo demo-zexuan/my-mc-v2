@@ -96,14 +96,26 @@ const TILE_RECT_VARYING = 'varying vec4 vTileRect;';
  * 2. 在 CPU 上把 UV 直接写成图集坐标会跨越到邻居 tile（图集不能开 RepeatWrapping）；
  *    而按格拆成 N 个四边形就等于放弃合并。
  * 3. `fract` 后的 UV 落在 `tileRect` 内，padding 永远参与不到采样，接缝不会渗色。
- *    代价是导数在整数边界处不连续，mip 级别在那一两像素上偏粗——padding 保证了
- *    偏粗的 mip 读到的仍是本 tile 的颜色。
+ *
+ * II. 为什么采样必须用 `textureGrad` 而不是 `texture2D`（真实缺陷的根因）
+ *
+ * 1. `fract()` 在每个整数 UV 边界上不连续。若把 `atlasUv` 交给 `texture2D`，硬件会对
+ *    **折叠后**的坐标做屏幕空间求导：在缝上 `dFdx/dFdy` 趋于无穷，mip 级别被选到最粗的
+ *    一级；而最粗的一级已经把整张图集平均成一个颜色（石块 + 沙子 + 草地的混合色）。
+ * 2. 表现就是：每个方块边界上出现一条 1 像素宽的"邻居颜色"亮线。水面是整片大矩形，
+ *    于是海上出现密集横纹；沙地出现规则的点阵/虚线；远处 mip 越粗越明显——这正是
+ *    "水面横向条纹"的真实成因，与共面深度冲突（z-fighting）无关。
+ * 3. 用折叠前的 uv 求导就能得到处处连续的解析导数：`atlasUv` 相对 `vMapUv` 的缩放
+ *    恰好是 tile 在 UV 空间中的尺寸（`tileRect.zw - tileRect.xy`），所以
+ *    `dFdx(atlasUv) === dFdx(vMapUv) * tileSize`，mip 级别从此正确。
+ * 4. Three.js r163 起所有内建材质都会被编译成 GLSL 3.00（见 `WebGLProgram` 的
+ *    `#version 300 es` 转换），`textureGrad` / `dFdx` 都是核心函数，无需扩展。
  */
 const MAP_FRAGMENT_PATCH = /* glsl */ `#ifdef USE_MAP
 
-	vec2 atlasUv = vTileRect.xy + fract( vMapUv ) * ( vTileRect.zw - vTileRect.xy );
-	vec4 sampledDiffuseColor = texture2D( map, atlasUv );
-	diffuseColor *= sampledDiffuseColor;
+	vec2 atlasTileSize = vTileRect.zw - vTileRect.xy;
+	vec2 atlasUv = vTileRect.xy + fract( vMapUv ) * atlasTileSize;
+		vec4 sampledDiffuseColor = texture2D( map, atlasUv );	diffuseColor *= sampledDiffuseColor;
 
 #endif
 `;
