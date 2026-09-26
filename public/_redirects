@@ -1,0 +1,12 @@
+# Cloudflare Pages rewrite rules.
+#
+# I. Why a catch-all rewrite exists
+#
+# The game currently lives on a single route, so the rewrite is not strictly
+# required. It is included because every URL that is not a static asset must
+# resolve to the application shell: without it, a future `/play/:worldId` route
+# or a deep link shared between players would return Pages' 404 page instead of
+# letting the client router decide. Cloudflare serves real files first, so
+# `assets/*` requests are unaffected.
+
+/*    /index.html    200

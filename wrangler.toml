@@ -1,0 +1,24 @@
+# Cloudflare Pages project configuration.
+#
+# I. Deployment model
+#
+# The game is a fully static single-page application: no Functions, no D1/KV and
+# no server-side rendering. Vite produces everything Pages needs in `dist/`, and
+# `pages_build_output_dir` below tells wrangler (and the Pages Git integration)
+# which directory to publish.
+#
+# II. Two supported deployment paths
+#
+# 1. Direct upload (used by `pnpm run deploy` and
+#    `.github/workflows/deploy-cloudflare-pages.yml`):
+#        wrangler pages deploy dist --project-name=my-mc-v2
+# 2. Git integration: connect the GitHub repository in the Cloudflare dashboard
+#    and configure
+#        build command:      pnpm run build
+#        build output dir:   dist
+#    Both paths must stay in sync, which is why the project name and output
+#    directory are declared here rather than in two places.
+
+name = "my-mc-v2"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "dist"

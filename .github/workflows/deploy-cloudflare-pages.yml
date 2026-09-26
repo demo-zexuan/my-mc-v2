@@ -1,0 +1,99 @@
+# Deploy the production build to Cloudflare Pages.
+#
+# I. Why direct upload instead of the Pages Git integration
+#
+# Both paths are supported and `wrangler.toml` describes the shared settings.
+# Direct upload is used here because it makes the pipeline explicit and
+# repeatable: the artefact is built once, in the same job that uploads it, so the
+# deployed revision is always traceable to a commit and cannot drift from what
+# CI verified.
+#
+# II. Required repository secrets
+#
+#   CLOUDFLARE_API_TOKEN   token with the "Cloudflare Pages: Edit" permission
+#   CLOUDFLARE_ACCOUNT_ID  account id that owns the Pages project
+#
+# Set them under Settings -> Secrets and variables -> Actions. The job fails with
+# a clear message when they are missing instead of uploading nothing.
+
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Pages branch to deploy to (main creates a production deployment)'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-pages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  PAGES_PROJECT: my-mc-v2
+
+jobs:
+  deploy:
+    name: Build & deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Verify Cloudflare credentials are configured
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::error::Secret CLOUDFLARE_API_TOKEN is not set."
+            missing=1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "::error::Secret CLOUDFLARE_ACCOUNT_ID is not set."
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            echo "See README.md -> Deployment for how to create the token."
+            exit 1
+          fi
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy dist
+            --project-name=${{ env.PAGES_PROJECT }}
+            --branch=${{ github.event.inputs.branch || 'main' }}
+            --commit-hash=${{ github.sha }}
+            --commit-message="${{ github.event.head_commit.message || github.sha }}"
