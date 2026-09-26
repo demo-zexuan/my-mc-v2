@@ -1,0 +1,18 @@
+{
+  // Formatting is owned by Prettier; ESLint only reports correctness problems.
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.useFlatConfig": true,
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.preferences.importModuleSpecifier": "non-relative",
+  "files.eol": "\n",
+  "files.exclude": {
+    "dist": true,
+    "coverage": true,
+    "playwright-report": true,
+    "test-results": true
+  }
+}
