@@ -205,7 +205,11 @@ describe('MainMenu', () => {
     });
 
     menu.update({ hasSave: false });
-    expect(element<HTMLButtonElement>('main-menu-start')?.disabled).toBe(true);
+    // The primary action stays clickable even with no save: a disabled main button
+    // reads as "this is broken", and with no save it simply creates a world from
+    // the seed field. The label changes so the outcome is still predictable.
+    expect(element<HTMLButtonElement>('main-menu-start')?.disabled).toBe(false);
+    expect(element('main-menu-start')?.textContent).toBe('开始新世界');
     expect(element('main-menu-start-hint')?.textContent).toContain('还没有存档');
 
     menu.update({ hasSave: true, version: '1.2.3', seed: 'preset' });

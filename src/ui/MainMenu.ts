@@ -188,16 +188,35 @@ export class MainMenu extends ModalScreen {
   }
 
   /**
+   * 种子输入框的当前内容。
+   *
+   * I. 为什么主菜单要暴露这个
+   *
+   * "开始游戏"在没有存档时会走新建世界这条路径，如果它忽略玩家刚输入的种子，
+   * 就会出现"填了种子却拿到随机世界"的困惑。让调用方读取同一个输入框，两条路径
+   * 的行为就完全一致。
+   */
+  public getSeedText(): string {
+    return this.#seedInput.value.trim();
+  }
+
+  /**
    * 刷新会话相关信息。
    *
    * @param info - 只传需要变化的字段；未传的字段保持原样。
    */
   public update(info: MainMenuInfo): void {
     if (info.hasSave !== undefined) {
-      this.#startButton.disabled = !info.hasSave;
+      // I. 开始游戏永远可点。
+      // 1. 之前在没有存档时把它禁用，玩家的第一反应是"这个按钮坏了" —— 主按钮
+      //    点不动是最容易被当成缺陷的交互，即使旁边写了解释。
+      // 2. 现在没有存档时它就等价于"用下面的种子新建世界"（留空即随机），按钮文案
+      //    与提示同步说明会发生什么，玩家不需要先理解"继续"和"新建"的区别。
+      this.#startButton.disabled = false;
+      this.#startButton.textContent = info.hasSave ? '开始游戏' : '开始新世界';
       this.#startHint.textContent = info.hasSave
         ? '从上次存档继续。'
-        : '还没有存档：在下面输入种子或留空，新建一个世界。';
+        : '还没有存档：将按下方种子创建一个新世界（留空则随机）。';
     }
 
     if (info.version !== undefined) {

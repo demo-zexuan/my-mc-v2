@@ -294,8 +294,10 @@ test.describe('QA 集成层', () => {
     await page.goto('/');
     await waitForMainMenu(page);
 
-    // I. 没有存档时"开始游戏"必须是禁用的，而不是点了没反应。
-    await expect(page.getByTestId('main-menu-start')).toBeDisabled();
+    // I. 没有存档时"开始游戏"必须仍然可点：主按钮禁用会被读成"坏了"，
+    //    此时它等价于用种子框内容新建世界，文案也相应改变。
+    await expect(page.getByTestId('main-menu-start')).toBeEnabled();
+    await expect(page.getByTestId('main-menu-start')).toHaveText('开始新世界');
 
     await enterWorld(page, 'qa-state-machine');
 

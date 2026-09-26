@@ -67,6 +67,13 @@ export interface GameEventMap {
   readonly 'ui:notice': {
     readonly text: string;
     readonly tone: 'info' | 'warn' | 'error';
+    /**
+     * How long the notice stays on screen, in milliseconds.
+     *
+     * Optional because most notices are transient by nature; onboarding hints use
+     * it to outlive the few seconds a player needs simply to read them.
+     */
+    readonly durationMs?: number;
   };
   /** The player moved between chunks; used to drive streaming and the HUD. */
   readonly 'player:chunk-changed': {

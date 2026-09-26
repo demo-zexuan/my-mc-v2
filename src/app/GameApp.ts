@@ -63,6 +63,21 @@ const WORLD_ROWS: readonly DebugRow[] = [
   { key: 'fly', label: 'Fly' },
 ];
 
+/**
+ * Control hints shown when a world is entered.
+ *
+ * I. Why they are injected after entering rather than only listed on the menu
+ *
+ * The menu is read before the player knows what the controls are for. Repeating
+ * them once the world is on screen — and allowing them back with `H` — is what
+ * turns a list into something usable at the moment it is needed.
+ */
+const IN_GAME_HINTS: readonly string[] = [
+  'WASD 移动 · 空格 跳跃 · Shift 疾跑 · Ctrl 潜行',
+  '按住左键 挖掘（方块会变暗）· 右键 放置 · 双击空格 飞行',
+  '滚轮 / 1-9 切换物品 · E 背包 · H 操作提示 · Esc 暂停 · F3 调试',
+];
+
 /** Version label shown on the main menu. */
 const APP_VERSION = '0.1.0';
 
@@ -198,7 +213,9 @@ export class GameApp {
     // IV. Menus.
     this.#mainMenu = new MainMenu(this.#root, {
       onStart: () => {
-        void this.#enterWorld(true);
+        // Continuing with a seed in the box and no save means "create a world with
+        // this seed"; passing it keeps the two paths indistinguishable.
+        void this.#enterWorld(true, this.#mainMenu?.getSeedText() ?? '');
       },
       onNewWorld: (seed) => {
         void this.#enterWorld(false, seed);
@@ -464,6 +481,7 @@ export class GameApp {
       this.#bootOverlay.hide();
       this.#debugOverlay?.toggle(this.#showDebug);
       this.#bus.emit('ui:notice', { text: `已进入世界：${worldName}`, tone: 'info' });
+      this.#showControlHints();
     } catch (error) {
       const appError = toAppError(error, 'WORLD_GENERATION_FAILED');
       log.error('entering the world failed', appError);
@@ -538,6 +556,15 @@ export class GameApp {
     void this.#refreshMenu();
   }
 
+  /** Publishes the control hints through the notice stack. */
+  #showControlHints(): void {
+    for (const text of IN_GAME_HINTS) {
+      // The default notice lifetime is a few seconds, which is not enough to read
+      // three lines while also looking at a world for the first time.
+      this.#bus.emit('ui:notice', { text, tone: 'info', durationMs: 14_000 });
+    }
+  }
+
   #requireRenderer(): THREE.WebGLRenderer {
     const renderer = this.#rendererHandle?.renderer;
     if (renderer === undefined) {
@@ -561,6 +588,12 @@ export class GameApp {
     if (event.code === 'F3') {
       event.preventDefault();
       this.#debugOverlay?.toggle();
+      return;
+    }
+
+    if (event.code === 'KeyH') {
+      event.preventDefault();
+      this.#showControlHints();
       return;
     }
 

@@ -726,7 +726,10 @@ export class WorldSession {
         // The bus speaks `warn`, the notice widget speaks `warning`; the mapping
         // lives here so neither side has to know the other's vocabulary.
         const kind = notice.tone === 'warn' ? 'warning' : notice.tone;
-        this.#notices.push(notice.text, { kind });
+        this.#notices.push(notice.text, {
+          kind,
+          ...(notice.durationMs === undefined ? {} : { durationMs: notice.durationMs }),
+        });
       }),
       bus.on('player:landed', ({ distance }) => {
         if (distance > 0.8) {
