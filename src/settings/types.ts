@@ -20,8 +20,6 @@
  * @module settings/types
  */
 
-import { z } from 'zod';
-
 /** Quality presets that map onto concrete renderer options. */
 export type GraphicsQuality = 'low' | 'medium' | 'high';
 
@@ -76,31 +74,43 @@ export const DEFAULT_SETTINGS: GameSettings = {
   invertY: false,
 };
 
-const settingsSchema = z.object({
-  mouseSensitivity: z.number().finite(),
-  fov: z.number().finite(),
-  renderDistance: z.number().finite(),
-  masterVolume: z.number().finite(),
-  sfxVolume: z.number().finite(),
-  ambientVolume: z.number().finite(),
-  graphicsQuality: z.enum(['low', 'medium', 'high']),
-  shadows: z.boolean(),
-  debugOverlay: z.boolean(),
-  viewBobbing: z.boolean(),
-  invertY: z.boolean(),
-});
-
-function readQuality(value: unknown): GraphicsQuality {
-  return value === 'low' || value === 'medium' || value === 'high'
-    ? value
-    : DEFAULT_SETTINGS.graphicsQuality;
+/** Narrows an untrusted value to a string-keyed record. */
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-function clamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
+/**
+ * Reads and clamps one numeric field.
+ *
+ * I. Why a missing or non-finite value falls back to the default rather than to
+ *    the nearest bound
+ *
+ * A corrupted sensitivity stored by another tab should restore the sane default
+ * value, not silently pin the setting to its minimum, which would look like the
+ * game ignoring the player's own configuration.
+ */
+function readNumber(
+  record: Record<string, unknown>,
+  key: keyof typeof SETTINGS_LIMITS,
+  fallback: number,
+): number {
+  const raw = record[key];
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return fallback;
   }
-  return Math.min(max, Math.max(min, value));
+  const limits = SETTINGS_LIMITS[key];
+  return Math.min(limits.max, Math.max(limits.min, raw));
+}
+
+/** Reads one boolean field, falling back when the stored value is not a boolean. */
+function readBoolean(record: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const raw = record[key];
+  return typeof raw === 'boolean' ? raw : fallback;
+}
+
+function readQuality(record: Record<string, unknown>): GraphicsQuality {
+  const raw = record['graphicsQuality'];
+  return raw === 'low' || raw === 'medium' || raw === 'high' ? raw : DEFAULT_SETTINGS.graphicsQuality;
 }
 
 /**
@@ -113,33 +123,26 @@ function clamp(value: number, min: number, max: number): number {
  * @returns A complete, in-range settings object.
  */
 export function normalizeSettings(value: unknown): GameSettings {
-  const parsed = settingsSchema.safeParse(value);
-  const source: Partial<Record<keyof GameSettings, unknown>> = parsed.success ? parsed.data : {};
-
-  const number = (key: keyof typeof SETTINGS_LIMITS): number => {
-    const raw = source[key];
-    const fallback = DEFAULT_SETTINGS[key] as number;
-    const limits = SETTINGS_LIMITS[key];
-    return clamp(typeof raw === 'number' ? raw : fallback, limits.min, limits.max);
-  };
-
-  const boolean = (key: 'shadows' | 'debugOverlay' | 'viewBobbing' | 'invertY'): boolean => {
-    const raw = source[key];
-    return typeof raw === 'boolean' ? raw : DEFAULT_SETTINGS[key];
-  };
+  const record = asRecord(value);
 
   return {
-    mouseSensitivity: number('mouseSensitivity'),
-    fov: number('fov'),
-    renderDistance: Math.round(number('renderDistance')),
-    masterVolume: number('masterVolume'),
-    sfxVolume: number('sfxVolume'),
-    ambientVolume: number('ambientVolume'),
-    graphicsQuality: readQuality(source.graphicsQuality),
-    shadows: boolean('shadows'),
-    debugOverlay: boolean('debugOverlay'),
-    viewBobbing: boolean('viewBobbing'),
-    invertY: boolean('invertY'),
+    mouseSensitivity: readNumber(
+      record,
+      'mouseSensitivity',
+      DEFAULT_SETTINGS.mouseSensitivity,
+    ),
+    fov: readNumber(record, 'fov', DEFAULT_SETTINGS.fov),
+    // A fractional render distance would create half-chunks in the streaming
+    // radius arithmetic, so it is rounded to a whole chunk count.
+    renderDistance: Math.round(readNumber(record, 'renderDistance', DEFAULT_SETTINGS.renderDistance)),
+    masterVolume: readNumber(record, 'masterVolume', DEFAULT_SETTINGS.masterVolume),
+    sfxVolume: readNumber(record, 'sfxVolume', DEFAULT_SETTINGS.sfxVolume),
+    ambientVolume: readNumber(record, 'ambientVolume', DEFAULT_SETTINGS.ambientVolume),
+    graphicsQuality: readQuality(record),
+    shadows: readBoolean(record, 'shadows', DEFAULT_SETTINGS.shadows),
+    debugOverlay: readBoolean(record, 'debugOverlay', DEFAULT_SETTINGS.debugOverlay),
+    viewBobbing: readBoolean(record, 'viewBobbing', DEFAULT_SETTINGS.viewBobbing),
+    invertY: readBoolean(record, 'invertY', DEFAULT_SETTINGS.invertY),
   };
 }
 

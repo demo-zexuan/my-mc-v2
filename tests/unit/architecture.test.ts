@@ -34,6 +34,7 @@ type Layer =
   | 'config'
   | 'debug'
   | 'engine'
+  | 'entities'
   | 'input'
   | 'interaction'
   | 'inventory'
@@ -60,6 +61,7 @@ const UI_AGNOSTIC_LAYERS: ReadonlySet<string> = new Set<string>([
   'audio',
   'config',
   'engine',
+  'entities',
   'input',
   'interaction',
   'inventory',
@@ -108,29 +110,75 @@ function listTypeScriptFiles(directory: string): string[] {
 /**
  * Extracts every module specifier a file imports.
  *
- * Handles `import x from '...'`, `import { y } from '...'`, `import '...'`,
- * `export ... from '...'` and dynamic `import('...')`. A regular expression is
- * sufficient here because the goal is to see the dependency edges, not to build
- * a full AST.
+ * I. Type-only imports are ignored
+ *
+ * `verbatimModuleSyntax` guarantees that `import type ...` and inline
+ * `{ type X }` specifiers are erased at compile time. They therefore cannot
+ * create a runtime initialisation cycle — the failure mode this check exists to
+ * prevent — and counting them as edges produces false positives that push people
+ * to contort otherwise reasonable code. An import counts as an edge only when at
+ * least one binding survives to runtime.
+ *
+ * @param source - File contents.
+ * @returns Module specifiers that produce a runtime dependency.
  */
 function extractImportSpecifiers(source: string): string[] {
   const specifiers: string[] = [];
   const patterns = [
-    /(?:^|\n)\s*import\s+[^'"]*from\s*['"]([^'"]+)['"]/g,
+    // `import x from '...'`, `import { a, type b } from '...'`
+    /(?:^|\n)\s*import\s+(?!type\s)([^'"]*?)from\s*['"]([^'"]+)['"]/g,
+    // Side-effect import: `import '...'` — always a runtime edge.
     /(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g,
-    /(?:^|\n)\s*export\s+[^'"]*from\s*['"]([^'"]+)['"]/g,
+    // `export { a } from '...'`, `export * from '...'`
+    /(?:^|\n)\s*export\s+(?!type\s)([^'"]*?)from\s*['"]([^'"]+)['"]/g,
+    // Dynamic `import('...')` is always a runtime edge.
     /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
   ];
 
   for (const pattern of patterns) {
     for (const match of source.matchAll(pattern)) {
-      const specifier = match[1];
-      if (specifier !== undefined) {
-        specifiers.push(specifier);
+      // The clause sits in group 1 for the from-forms, group 2 for the path.
+      const clause = match.length > 2 ? (match[1] ?? '') : '';
+      const specifier = match.length > 2 ? match[2] : match[1];
+      if (specifier === undefined) {
+        continue;
       }
+      if (clause !== '' && clauseIsTypeOnly(clause)) {
+        continue;
+      }
+      specifiers.push(specifier);
     }
   }
   return specifiers;
+}
+
+/**
+ * Decides whether an import clause carries no runtime binding.
+ *
+ * @param clause - Text between `import`/`export` and `from`.
+ */
+function clauseIsTypeOnly(clause: string): boolean {
+  const trimmed = clause.trim();
+  if (trimmed.startsWith('type ') || trimmed.startsWith('type{')) {
+    return true;
+  }
+  // Named list: every element must be individually marked `type`.
+  const named = /\{([^}]*)\}/.exec(trimmed);
+  if (named !== null) {
+    const body = named[1] ?? '';
+    const parts = body
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '');
+    // A default or namespace binding outside the braces keeps the import alive.
+    const outsideBraces = trimmed.replace(/\{[^}]*\}/, '').replace(/,\s*$/, '').trim();
+    const hasRuntimeOutsideBraces =
+      outsideBraces !== '' && outsideBraces !== ',' && outsideBraces !== 'default';
+    if (!hasRuntimeOutsideBraces && parts.length > 0 && parts.every((p) => p.startsWith('type '))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Resolves a specifier to a file on disk, or `null` for external packages. */
@@ -269,6 +317,7 @@ describe('architecture constraints', () => {
       'config',
       'debug',
       'engine',
+      'entities',
       'input',
       'interaction',
       'inventory',
