@@ -367,6 +367,9 @@ export class GameApp {
     overlay.set('chunk', `${chunk.cx} ${chunk.cz}`);
     overlay.set('chunks', `${worldStats.chunks} (+${worldStats.queued}q/${worldStats.inFlight}f)`);
     overlay.set('renderDistance', `${this.#settings.current.renderDistance} chunks`);
+    // The seed was written once at boot from the environment default, so a world
+    // created with a typed seed kept showing "随机".
+    overlay.set('seed', session.seedLabel);
     overlay.set('entities', String(worldStats.drops));
     overlay.set('particles', String(worldStats.particles));
     overlay.set('time', `${Math.round(worldStats.timeTicks)} t`);

@@ -1,15 +1,8 @@
-/**
- * Canopy probe: walk from spawn toward the nearby trees and look straight up, so
- * the leaf underside can be inspected. Also captures a shoreline view with both
- * water and sky in frame.
- *
- * Usage: node .tmp-probe-canopy.mjs <tag> [url]
- */
 import { mkdir } from 'node:fs/promises';
 import { chromium } from '@playwright/test';
 
 const tag = process.argv[2] ?? 'shot';
-const url = process.argv[3] ?? 'http://127.0.0.1:4173/';
+const url = process.argv[3] ?? 'http://127.0.0.1:4175/';
 const outDir = `/tmp/canopy-shots/${tag}`;
 await mkdir(outDir, { recursive: true });
 
@@ -43,7 +36,7 @@ console.log('world ready');
 await page.waitForTimeout(4000);
 
 await page.mouse.click(640, 360);
-await page.waitForTimeout(300);
+await page.waitForTimeout(400);
 
 const shoot = async (name) => {
   await page.waitForTimeout(400);
@@ -51,15 +44,24 @@ const shoot = async (name) => {
   console.log('[shot]', name);
 };
 
-const look = async (dx, dy) => {
-  // 指针锁定下就是靠位移驱动视角；分几步走，避免单帧跳变。
-  const steps = 10;
-  for (let i = 0; i < steps; i += 1) {
-    await page.mouse.move(640 + (dx * (i + 1)) / steps, 360 + (dy * (i + 1)) / steps);
-    await page.waitForTimeout(30);
-  }
-  await page.mouse.move(640, 360);
-  await page.waitForTimeout(200);
+const yawSweep = async (distance) => {
+  const from = distance > 0 ? 40 : 1240;
+  const to = distance > 0 ? 1240 : 40;
+  await page.mouse.move(from, 360);
+  await page.mouse.move(to, 360, { steps: 16 });
+  await page.waitForTimeout(250);
+};
+
+const lookUp = async () => {
+  await page.mouse.move(640, 700);
+  await page.mouse.move(640, 20, { steps: 16 });
+  await page.waitForTimeout(250);
+};
+
+const lookLevel = async () => {
+  await page.mouse.move(640, 20);
+  await page.mouse.move(640, 700, { steps: 16 });
+  await page.waitForTimeout(250);
 };
 
 const walk = async (seconds) => {
@@ -69,19 +71,27 @@ const walk = async (seconds) => {
   await page.waitForTimeout(300);
 };
 
-// I. 出生点平视：同时包含水面与天空。
 await shoot('a-spawn-level');
+await yawSweep(-1);
+await walk(2.2);
+await lookUp();
+await shoot('b-up-0');
 
-// II. 朝左侧树林走一段，然后抬头看树冠。
-await look(-260, 0);
-for (const [index, seconds] of [1.6, 1.6, 1.4].entries()) {
-  await walk(seconds);
-  // 抬头 80° 左右：约 0.0022 rad/px 灵敏度 → 1.4 rad ≈ 636 px。
-  await look(0, -640);
-  await shoot(`b-up-${index}`);
-  // 收回视线，换个方向继续找树。
-  await look(0, 640);
-  await look(index === 1 ? -160 : 0, 0);
-}
+await lookLevel();
+await walk(1.2);
+await yawSweep(1);
+await lookUp();
+await shoot('b-up-1');
+
+await lookLevel();
+await walk(1.2);
+await yawSweep(1);
+await lookUp();
+await shoot('b-up-2');
+
+await lookLevel();
+await walk(1.4);
+await lookUp();
+await shoot('b-up-3');
 
 await browser.close();

@@ -265,15 +265,14 @@ test.describe('QA 集成层', () => {
     ).toBeLessThanOrEqual(1.2);
   });
 
-  test.fail('暂停 → 设置 → 返回 之后暂停菜单应当恢复（已知缺陷）', async ({ page }) => {
-    // 已知缺陷（QA 结论，未修复）：`WorldSession.setSettingsVisible()` 的两个分支互相
-    // 矛盾 —— 打开设置时 `setSettingsVisible(true)` 会 `#pauseMenu.hide()`，而关闭设置时
+  test('暂停 → 设置 → 返回 之后暂停菜单应当恢复', async ({ page }) => {
+    // 回归测试。原缺陷：`WorldSession.setSettingsVisible()` 的两个分支互相矛盾 —— 打开
+    // 设置时 `setSettingsVisible(true)` 会 `#pauseMenu.hide()`，而关闭设置时
     // `setSettingsVisible(false)` 只在 `#pauseMenu.visible` 为真时才 `show()`。此时它必然
-    // 为假，于是从设置返回后：`GameState` 已经回到 `paused`，**但暂停菜单没有重新显示**，
-    // 玩家看到的是一幅冻结、没有任何界面的画面（再按一次 Esc 才能靠 `togglePause()` 找回
-    // 菜单，所以不是永久死锁，但状态与界面明显不一致）。
+    // 为假，于是从设置返回后 `GameState` 已经回到 `paused`，**但暂停菜单没有重新显示**，
+    // 玩家看到的是一幅冻结、没有任何界面的画面。
     //
-    // `test.fail()`：修复后本用例会变成 Unexpected pass，届时翻转成普通 `test(...)`。
+    // 现在由 `#pauseMenuBeforeSettings` 记住"进入设置前的界面"，返回时据此恢复。
     await page.goto('/');
     await waitForMainMenu(page);
     await enterWorld(page, 'qa-settings-return');

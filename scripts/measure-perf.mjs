@@ -396,6 +396,29 @@ async function enterWorld(page, timeoutMs, seed) {
     await page.waitForTimeout(500);
   }
 
+  // I. 等区块流式加载收敛，而不是"一有区块就开始测"。
+  // 1. 渲染循环越慢，每帧能重建的区块越少，于是"刚开始测"时加载的区块数会明显偏低
+  //    （实测 1280x720 下 65 个 vs 640x360 下 197 个），两个分辨率就不可比了。
+  // 2. 这里等到区块数连续 4 秒不再增长，或最多再等 30 秒。
+  if (chunks > 0) {
+    const settleDeadline = Math.min(deadline, Date.now() + 30_000);
+    let previous = chunks;
+    let stableSince = Date.now();
+    while (Date.now() < settleDeadline) {
+      await page.waitForTimeout(500);
+      const current = await readChunkCount();
+      if (current !== previous) {
+        previous = current;
+        stableSince = Date.now();
+        continue;
+      }
+      if (Date.now() - stableSince >= 4000) {
+        break;
+      }
+    }
+    chunks = previous;
+  }
+
   if (chunks === 0) {
     throw new Error(
       '世界没有在超时时间内加载出任何区块，性能数字会是无意义的空转数据。' +

@@ -207,6 +207,13 @@ describe('BlockAtlas 图案', () => {
 });
 
 describe('BlockAtlas 纹理设置', () => {
+  it('默认各向异性为 8，可被显式覆盖', () => {
+    installCanvas2DStub();
+    // 掠射角下的地面/水面靠各向异性过滤抑制摩尔纹，默认值刻意不取 1。
+    expect(new BlockAtlas().texture.anisotropy).toBe(8);
+    expect(new BlockAtlas({ anisotropy: 16 }).texture.anisotropy).toBe(16);
+  });
+
   it('使用 Nearest + mipmap + sRGB + 各向异性 + 边缘钳制', () => {
     installCanvas2DStub();
     const atlas = new BlockAtlas({ anisotropy: 8 });

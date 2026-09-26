@@ -74,7 +74,18 @@ export interface BlockAtlasOptions {
   readonly padding?: number;
   /** 图集列数；默认按 slot 数开平方取整。 */
   readonly columns?: number;
-  /** 各向异性过滤等级，默认 4；由调用方按硬件上限收敛。 */
+  /**
+   * 各向异性过滤等级，默认 8。
+   *
+   * I. 为什么默认值不取 1 或 16
+   *
+   * 1. 体素世界的地面/水面几乎总是以掠射角出现在屏幕上，各向异性过滤正是为这种
+   *    "一个方向被极度压缩"的情形准备的：等级越高，沿压缩方向的采样数越多，
+   *    远处地表与水面上的摩尔纹越少。
+   * 2. 代价只落在掠射角的那些像素上（纹理带宽），对近景没有影响，因此取一个中等偏高的
+   *    默认值是划算的；需要极致画质时调用方仍可传硬件上限
+   *    （`renderer.capabilities.getMaxAnisotropy()`），Three.js 会自动钳制到硬件支持值。
+   */
   readonly anisotropy?: number;
   /** 噪声种子；固定默认值保证同一份代码画出完全相同的图集。 */
   readonly seed?: number;
@@ -387,7 +398,7 @@ export class BlockAtlas implements TileLookup {
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.max(1, Math.floor(options.anisotropy ?? 4));
+    texture.anisotropy = Math.max(1, Math.floor(options.anisotropy ?? 8));
     texture.needsUpdate = true;
     this.texture = texture;
   }

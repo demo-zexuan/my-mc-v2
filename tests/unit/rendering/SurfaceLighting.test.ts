@@ -153,6 +153,48 @@ describe('朝下的面在白天仍有光照（树叶底面不是黑的）', () =
     rig.dispose();
   });
 
+  it('Sky 自动认领光照装置并每帧驱动，调用方漏同步也不会出现黑面', () => {
+    const scene = new THREE.Scene();
+    const rig = createEnvironment(scene);
+    // 装置刚建立时环境光是关闭的（默认 0），避免影响不使用 Sky 的场景。
+    expect(rig.ambientLight.intensity).toBe(0);
+
+    // 不传 environment：Sky 应当按名字自动认领 createEnvironment 建立的灯光，
+    // 并在构造时的第一次 update 里就把灯光点亮。
+    const sky = new Sky(scene, { cycle: new DayNightCycle({ startTime: 0.5 }), radius: 200 });
+
+    expect(sky.environment).not.toBeNull();
+    expect(sky.environment?.ambientLight).toBe(rig.ambientLight);
+    expect(sky.environment?.hemisphereLight).toBe(rig.hemisphereLight);
+    expect(rig.ambientLight.intensity).toBeGreaterThan(0);
+
+    sky.update(0);
+    expect(rig.ambientLight.intensity).toBeGreaterThan(0);
+    // 地面反弹项也不再是出厂默认的暗棕色。
+    expect(rig.hemisphereLight.groundColor.getHex()).not.toBe(0x6b5637);
+
+    const down = reflectedSrgb(rig, DOWN_NORMAL_Y, LEAF_ALBEDO);
+    const luminance = 0.2126 * down.r + 0.7152 * down.g + 0.0722 * down.b;
+    expect(luminance).toBeGreaterThan(0.1);
+
+    sky.dispose();
+    rig.dispose();
+  });
+
+  it('显式传 environment: null 时不接管灯光', () => {
+    const scene = new THREE.Scene();
+    const rig = createEnvironment(scene);
+    const sky = new Sky(scene, { radius: 200, environment: null });
+
+    expect(sky.environment).toBeNull();
+    sky.update(0.1);
+    expect(rig.ambientLight.intensity).toBe(0);
+    expect(rig.hemisphereLight.groundColor.getHex()).toBe(0x6b5637);
+
+    sky.dispose();
+    rig.dispose();
+  });
+
   it('环境光由光照装置提供，并在 dispose 时移除', () => {
     const scene = new THREE.Scene();
     const rig = createEnvironment(scene);

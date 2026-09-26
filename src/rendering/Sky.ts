@@ -407,6 +407,48 @@ export interface SkyOptions {
   readonly cloudScale?: number;
   /** 时间推进器；省略时按默认参数新建。 */
   readonly cycle?: DayNightCycle;
+  /**
+   * 光照装置（通常是 `createEnvironment(scene)` 的返回值）。
+   *
+   * 1. 显式传入时由 `Sky.update()` 每帧驱动：平行光方向/强度、半球光天空项与地面项、
+   *    环境光下限全部来自同一份 `SkyState`，调用方不需要再手动同步。
+   * 2. 省略时自动从场景里认领 `createEnvironment` 建立的标准灯光（按固定名字查找），
+   *    这样即使调用方只驱动了其中一部分，也不会出现"树叶底面纯黑"这类漏光。
+   * 3. 传 `null` 明确表示"不要接管"，此时只能手动调用 `syncEnvironment()`。
+   */
+  readonly environment?: EnvironmentRig | null;
+}
+
+/** 光照装置在场景中的固定名字，供 {@link Sky} 自动认领。 */
+const SUN_LIGHT_NAME = 'environment:sun';
+const HEMISPHERE_LIGHT_NAME = 'environment:hemisphere';
+const AMBIENT_LIGHT_NAME = 'environment:ambient';
+
+/**
+ * 在场景里寻找 {@link createEnvironment} 建立的灯光。
+ *
+ * @param scene - 场景。
+ * @returns 找到的装置（`dispose` 为空操作，因为所有权仍归创建者），或 `null`。
+ */
+function findEnvironmentRig(scene: THREE.Scene): EnvironmentRig | null {
+  const sun = scene.getObjectByName(SUN_LIGHT_NAME);
+  const hemisphere = scene.getObjectByName(HEMISPHERE_LIGHT_NAME);
+  const ambient = scene.getObjectByName(AMBIENT_LIGHT_NAME);
+  if (
+    !(sun instanceof THREE.DirectionalLight) ||
+    !(hemisphere instanceof THREE.HemisphereLight) ||
+    !(ambient instanceof THREE.AmbientLight)
+  ) {
+    return null;
+  }
+  return {
+    sunLight: sun,
+    hemisphereLight: hemisphere,
+    ambientLight: ambient,
+    dispose: (): void => {
+      // 灯光由 createEnvironment 拥有，这里不释放。
+    },
+  };
 }
 
 const DOME_VERTEX_SHADER = /* glsl */ `varying vec3 vSkyDirection;
@@ -545,6 +587,8 @@ export class Sky {
   readonly #radius: number;
   readonly #cloudHeight: number;
   readonly #lightDistance = 180;
+  /** 由本类驱动的光照装置；`null` 表示调用方自己管理灯光。 */
+  readonly #rig: EnvironmentRig | null;
 
   #elapsed = 0;
   #disposed = false;
@@ -552,6 +596,7 @@ export class Sky {
   public constructor(scene: THREE.Scene, options: SkyOptions = {}) {
     this.#scene = scene;
     this.cycle = options.cycle ?? new DayNightCycle();
+    this.#rig = options.environment === undefined ? findEnvironmentRig(scene) : options.environment;
     this.#radius = options.radius ?? 400;
     this.#cloudHeight = options.cloudHeight ?? 150;
 
@@ -698,6 +743,17 @@ export class Sky {
 
     // IV. 雾色：与天空同步插值，否则远处地形会在天空背景上"浮起来"。
     this.applyFog(this.#scene.fog);
+
+    // V. 灯光：只要装置在手就一并驱动，避免调用方只同步了一半（漏掉地面反弹或环境光），
+    //    那正是"站在树冠下抬头是一片黑"的成因。
+    if (this.#rig !== null) {
+      this.syncEnvironment(this.#rig);
+    }
+  }
+
+  /** 当前被本类驱动的光照装置；`null` 表示调用方自己管理灯光。 */
+  public get environment(): EnvironmentRig | null {
+    return this.#rig;
   }
 
   /** 把当前雾色写入场景的雾。 */

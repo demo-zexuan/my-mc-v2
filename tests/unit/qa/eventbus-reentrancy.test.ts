@@ -161,22 +161,13 @@ describe('EventBus: mutation during dispatch', () => {
 });
 
 describe('EventBus: once() re-entrancy', () => {
-  it('fires exactly once when the handler emits the same event again (unfixed defect)', () => {
-    // Still broken after the `try/finally` fix to `emit`: `once` removes the
-    // subscription by calling its own handle, but while a dispatch is in progress
-    // that removal is *deferred* until the outermost emit returns. The nested
-    // emit therefore takes a fresh snapshot of a set that still contains the
-    // listener, so the "exactly one emission" contract is broken and the handler
-    // runs twice.
-    //
-    // Reproduce: `bus.once('time:tick', handler)` where `handler` emits
-    // `time:tick` once — the handler is invoked for both emissions.
-    //
-    // This is a characterisation of the current behaviour: if `once` is made
-    // re-entrancy safe (for example by removing the entry from the set
-    // immediately and keeping a separate "already fired" flag), this test will
-    // start failing, which is the signal to flip it into a regression test that
-    // asserts `seen === [1]`.
+  it('fires exactly once when the handler emits the same event again', () => {
+    // Regression: `once` used to remove its subscription through its own handle,
+    // and a removal requested during a dispatch is *deferred* until the outermost
+    // emit returns. The nested emit therefore iterated a snapshot that still
+    // contained the listener, so the "exactly one emission" contract was broken
+    // and the handler ran twice. The guard now lives in a `fired` flag inside the
+    // wrapper, which is checked before anything else.
     const bus = new EventBus();
     const seen: number[] = [];
     let reentered = false;
@@ -191,9 +182,12 @@ describe('EventBus: once() re-entrancy', () => {
 
     bus.emit('time:tick', TICK);
 
-    expect(seen).toEqual([1, 2]);
-    // It is at least removed afterwards, so this is a double-fire, not a leak.
+    // The handler records `deltaSeconds`, so the expectation is the scalar.
+    expect(seen).toEqual([TICK.deltaSeconds]);
+    // And the subscription must be gone for good.
     expect(bus.listenerCount('time:tick')).toBe(0);
+    bus.emit('time:tick', TICK);
+    expect(seen).toEqual([TICK.deltaSeconds]);
   });
 
   it('fires exactly once for two sequential emissions', () => {

@@ -128,7 +128,16 @@ export class EventBus {
 
   /** Subscribes for exactly one emission. */
   public once<K extends GameEventName>(event: K, listener: GameEventListener<K>): Unsubscribe {
+    // I. The guard matters because unsubscribing during a dispatch is deferred.
+    // 1. A listener that re-emits the same event would otherwise still be present
+    //    in the snapshot being iterated and fire a second time, so `once` would
+    //    deliver twice.
+    let fired = false;
     const off = this.on(event, (payload) => {
+      if (fired) {
+        return;
+      }
+      fired = true;
       off();
       listener(payload);
     });

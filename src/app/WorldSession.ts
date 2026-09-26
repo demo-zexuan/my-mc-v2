@@ -514,15 +514,7 @@ export class WorldSession {
       if (this.#options.state.current === 'playing') {
         this.#options.state.transition('paused');
       }
-      this.#pauseMenu.update({
-        playTimeMs: this.#playTimeMs,
-        seedLabel:
-          typeof this.#options.seed === 'number'
-            ? `seed-${this.#options.seed}`
-            : this.#options.seed || '随机',
-        saving: false,
-      });
-      this.#pauseMenu.show();
+      this.#showPauseMenu();
     } else {
       this.#pauseMenu.hide();
       if (this.#options.state.current === 'paused') {
@@ -531,13 +523,48 @@ export class WorldSession {
     }
   }
 
-  /** Registers the settings screen as visible so the menu keeps its state. */
+  #pauseMenuBeforeSettings = false;
+
+  /**
+   * Opens the pause menu with a fresh snapshot.
+   *
+   * I. Why `setSettingsVisible` needs a remembered flag rather than re-reading
+   *    `#pauseMenu.visible`
+   *
+   * Opening the settings screen hides the pause menu. Testing `visible` on the way
+   * back therefore always read `false`, so the pause menu never returned and the
+   * game sat in the `paused` state with no interface on screen at all.
+   */
+  #showPauseMenu(): void {
+    this.#pauseMenu.update({
+      playTimeMs: this.#playTimeMs,
+      seedLabel: this.seedLabel,
+      saving: false,
+    });
+    this.#pauseMenu.show();
+  }
+
+  /** Shows or hides the settings screen, preserving the screen underneath. */
   public setSettingsVisible(visible: boolean): void {
-    if (!visible && this.#pauseMenu.visible) {
-      this.#pauseMenu.show();
-    } else if (visible) {
-      this.#pauseMenu.hide();
+    if (visible) {
+      this.#pauseMenuBeforeSettings = this.#pauseMenu.visible;
+      if (this.#pauseMenuBeforeSettings) {
+        this.#pauseMenu.hide();
+      }
+      return;
     }
+
+    if (this.#pauseMenuBeforeSettings) {
+      this.#showPauseMenu();
+    }
+    this.#pauseMenuBeforeSettings = false;
+  }
+
+  /** World seed as the player typed it, for the debug overlay and the pause menu. */
+  public get seedLabel(): string {
+    return typeof this.#options.seed === 'number'
+      ? `seed-${this.#options.seed}`
+      : this.#options.seed || '随机';
   }
 
   public dispose(): void {
