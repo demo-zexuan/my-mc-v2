@@ -31,6 +31,12 @@ playwright/.cache/
 Thumbs.db
 *.swp
 
+# Scratch files
+# Diagnostic scripts written during an investigation must never break the
+# quality gate, which lints every JavaScript file in the repository.
+.tmp-*
+*.tmp
+
 # Logs
 *.log
 npm-debug.log*
